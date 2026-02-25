@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Event Counter PWA</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Event Counter</h1>
+        <div class="controls">
+            <select id="sortSelect">
+                <option value="manual">Manual Order</option>
+                <option value="alphabetical">Alphabetical</option>
+                <option value="highest">Highest Today</option>
+            </select>
+            <button id="exportBtn" class="secondary-btn">⬇ CSV</button>
+            <button id="openModalBtn" class="primary-btn">+ New Card</button>
+        </div>
+    </header>
+
+    <main>
+        <div id="cardContainer"></div>
+    </main>
+
+    <div id="newCardModal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Nieuwe Kaart</h2>
+            <input type="text" id="cardTitleInput" placeholder="Titel van de kaart" autocomplete="off">
+            
+            <p class="color-label">Kies een kleur:</p>
+            <div id="colorPicker" class="color-grid">
+                </div>
+
+            <div class="modal-actions">
+                <button id="cancelModalBtn" class="secondary-btn">Annuleren</button>
+                <button id="saveCardBtn" class="primary-btn">Aanmaken</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>

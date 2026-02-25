@@ -1,0 +1,15 @@
+{
+  "name": "Event Counter",
+  "short_name": "Counter",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4f7f6",
+  "theme_color": "#007bff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "192x192 any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
