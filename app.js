@@ -1,37 +1,31 @@
-// --- INITIALIZATION ---
+// --- CONFIG & STATE ---
 const dbName = 'CounterAppDB';
 let db;
 let currentSort = localStorage.getItem('sortMethod') || 'manual';
-document.getElementById('sortSelect').value = currentSort;
+let isCompactMode = localStorage.getItem('compactMode') === 'true';
+let currentTimeframe = localStorage.getItem('timeframe') || 'V';
+const timeframes = ['U', 'V', 'W', 'M', 'J'];
 
-const presetColors = [
-    '#FADCD9', '#F8E2CF', '#F5EECC', '#C9E4DE', 
-    '#C6DEF1', '#DBCDF0', '#F2C6DE', '#F7D9C4', 
-    '#E2E2E2', '#C1E1C1', '#F0E6EF', '#E2D1F9'
-];
+const presetColors = ['#FADCD9', '#F8E2CF', '#F5EECC', '#C9E4DE', '#C6DEF1', '#DBCDF0', '#F2C6DE', '#F7D9C4', '#E2E2E2', '#C1E1C1', '#F0E6EF', '#E2D1F9'];
 let selectedModalColor = presetColors[0];
-let editingCardId = null; // Houdt bij of we een kaart bewerken of nieuw maken
+let editingCardId = null;
 
+// --- DB CORE ---
 const initDB = () => {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(dbName, 1);
         request.onupgradeneeded = (e) => {
             db = e.target.result;
-            if (!db.objectStoreNames.contains('cards')) {
-                db.createObjectStore('cards', { keyPath: 'id' });
-            }
+            if (!db.objectStoreNames.contains('cards')) db.createObjectStore('cards', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('events')) {
                 const eventStore = db.createObjectStore('events', { keyPath: 'id' });
-                eventStore.createIndex('cardId_date', ['cardId', 'date'], { unique: false });
+                eventStore.createIndex('cardId', 'cardId', { unique: false });
             }
         };
         request.onsuccess = (e) => { db = e.target.result; resolve(); };
-        request.onerror = (e) => { reject(e); };
+        request.onerror = (e) => reject(e);
     });
 };
-
-const generateUUID = () => crypto.randomUUID();
-const getTodayDateString = () => new Date().toISOString().split('T')[0];
 
 const getAllFromStore = (storeName) => {
     return new Promise((resolve) => {
@@ -41,317 +35,253 @@ const getAllFromStore = (storeName) => {
     });
 };
 
-// --- DATA OPERATIONS ---
-const addCardToDB = (name, color) => {
-    return new Promise((resolve) => {
-        const transaction = db.transaction(['cards'], 'readwrite');
-        const countReq = transaction.objectStore('cards').count();
-        countReq.onsuccess = () => {
-            const card = {
-                id: generateUUID(),
-                name: name,
-                color: color || '#E2E2E2',
-                orderIndex: countReq.result,
-                createdAt: new Date().toISOString()
-            };
-            transaction.objectStore('cards').add(card);
-            transaction.oncomplete = () => resolve(card);
-        };
-    });
-};
-
-// NIEUW: Functie om de naam en kleur van een bestaande kaart op te slaan
-const updateCardDetailsInDB = (id, newName, newColor) => {
+// --- DATA ACTIONS ---
+const saveCard = (card) => {
     return new Promise((resolve) => {
         const store = db.transaction(['cards'], 'readwrite').objectStore('cards');
-        const req = store.get(id);
-        req.onsuccess = () => {
-            const card = req.result;
-            card.name = newName;
-            card.color = newColor;
-            store.put(card).onsuccess = resolve;
-        };
+        const req = store.put(card);
+        req.onsuccess = () => resolve();
     });
 };
 
-const addEventToDB = (cardId, delta) => {
+const addEvent = (cardId, delta) => {
     return new Promise((resolve) => {
         const event = {
-            id: generateUUID(), cardId: cardId,
-            date: getTodayDateString(), timestamp: new Date().toISOString(),
+            id: crypto.randomUUID(), cardId: cardId,
+            timestamp: new Date().toISOString(),
+            date: new Date().toISOString().split('T')[0],
             delta: delta
         };
-        const transaction = db.transaction(['events'], 'readwrite');
-        transaction.objectStore('events').add(event);
-        transaction.oncomplete = () => resolve(event);
+        const store = db.transaction(['events'], 'readwrite').objectStore('events');
+        store.add(event).onsuccess = () => resolve();
     });
 };
 
-const updateCardOrderInDB = (id, newIndex) => {
-    return new Promise((resolve) => {
-        const store = db.transaction(['cards'], 'readwrite').objectStore('cards');
-        const req = store.get(id);
-        req.onsuccess = () => {
-            const card = req.result;
-            card.orderIndex = newIndex;
-            store.put(card).onsuccess = resolve;
-        };
-    });
-};
-
-// --- TIME FORMATTERS ---
-const formatTimeAgo = (timestamp) => {
-    if (!timestamp) return "Nog niet geklikt";
-    const diffMs = Date.now() - new Date(timestamp).getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    
-    if (diffMins < 1) return "Zojuist";
-    if (diffMins < 60) return `${diffMins} min. geleden`;
-    const diffHrs = Math.floor(diffMins / 60);
-    if (diffHrs < 24) return `${diffHrs} uur geleden`;
-    const diffDays = Math.floor(diffHrs / 24);
-    return `${diffDays} dagen geleden`;
-};
-
-const formatDateTime = (timestamp) => {
-    if (!timestamp) return "-";
-    const d = new Date(timestamp);
-    const date = d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const time = d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-    return `${date} ${time}`;
-};
-
-// --- UI LOGIC ---
+// --- UI RENDER ---
 const renderCards = async () => {
-    const cards = await getAllFromStore('cards');
+    const allCards = await getAllFromStore('cards');
+    const cards = allCards.filter(c => !c.deleted);
     const events = await getAllFromStore('events');
 
-    const statsMap = {};
-    cards.forEach(c => statsMap[c.id] = { today: 0, total: 0, lastTimestamp: null });
+    const periods = getPeriods();
+    const stats = {};
+    cards.forEach(c => stats[c.id] = { valU:0, valV:0, valW:0, valM:0, valJ:0, total:0, last:null });
 
-    const todayStr = getTodayDateString();
     events.forEach(ev => {
-        if (!statsMap[ev.cardId]) return;
-        statsMap[ev.cardId].total += ev.delta;
-        if (ev.date === todayStr) statsMap[ev.cardId].today += ev.delta;
-        
-        const evTime = new Date(ev.timestamp).getTime();
-        const currLast = statsMap[ev.cardId].lastTimestamp;
-        if (!currLast || evTime > new Date(currLast).getTime()) {
-            statsMap[ev.cardId].lastTimestamp = ev.timestamp;
-        }
+        if (!stats[ev.cardId]) return;
+        const time = new Date(ev.timestamp).getTime();
+        stats[ev.cardId].total += ev.delta;
+        if (time >= periods.h) stats[ev.cardId].valU += ev.delta;
+        if (time >= periods.d) stats[ev.cardId].valV += ev.delta;
+        if (time >= periods.w) stats[ev.cardId].valW += ev.delta;
+        if (time >= periods.m) stats[ev.cardId].valM += ev.delta;
+        if (time >= periods.y) stats[ev.cardId].valJ += ev.delta;
+        if (!stats[ev.cardId].last || time > new Date(stats[ev.cardId].last).getTime()) stats[ev.cardId].last = ev.timestamp;
     });
 
-    const cardsWithStats = cards.map(card => ({
-        ...card,
-        todayValue: statsMap[card.id].today,
-        totalValue: statsMap[card.id].total,
-        lastTimestamp: statsMap[card.id].lastTimestamp
+    const key = 'val' + currentTimeframe;
+    const list = cards.map(c => ({
+        ...c,
+        display: (c.startValue || 0) + stats[c.id][key],
+        total: (c.startValue || 0) + stats[c.id].total,
+        last: stats[c.id].last
     }));
 
-    if (currentSort === 'alphabetical') {
-        cardsWithStats.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (currentSort === 'highest') {
-        cardsWithStats.sort((a, b) => b.todayValue - a.todayValue);
-    } else {
-        cardsWithStats.sort((a, b) => a.orderIndex - b.orderIndex);
-    }
+    if (currentSort === 'alphabetical') list.sort((a,b) => a.name.localeCompare(b.name));
+    else if (currentSort === 'highest') list.sort((a,b) => b.display - a.display);
+    else list.sort((a,b) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
     const container = document.getElementById('cardContainer');
     container.innerHTML = '';
-
-    // Check of we in 'manual' mode zitten. Zo ja = zichtbaar, anders onzichtbaar (maar neemt wel ruimte in!)
-    const dragVisibility = currentSort === 'manual' ? 'visible' : 'hidden';
-
-    cardsWithStats.forEach(card => {
+    
+    list.forEach(card => {
+        const step = card.stepValue || 1;
         const div = document.createElement('div');
         div.className = 'card';
-        div.dataset.id = card.id;
-        div.style.backgroundColor = card.color || '#E2E2E2';
-        
+        div.style.backgroundColor = card.color;
         div.innerHTML = `
-            <div class="drag-handle" style="visibility: ${dragVisibility};">☰</div>
-            <button class="counter-btn minus-btn ${card.todayValue <= 0 ? 'disabled' : ''}" data-id="${card.id}">-</button>
-            
+            <div class="drag-handle" style="display: ${currentSort==='manual'?'block':'none'}">☰</div>
+            <button class="counter-btn minus" data-id="${card.id}" data-step="${step}">-</button>
             <div class="card-center">
-                <div class="card-title-container edit-card-btn" data-id="${card.id}">
-                    <div class="card-title">${card.name}</div>
-                    <div class="edit-icon">✏️</div>
+                <div class="card-title-container edit-trigger" data-id="${card.id}">
+                    <span class="card-title">${card.name}</span> ✏️
                 </div>
-                <div class="card-count">${card.todayValue}</div>
-                <div class="card-time-ago">${formatTimeAgo(card.lastTimestamp)}</div>
-                <div class="card-datetime">${formatDateTime(card.lastTimestamp)}</div>
+                <div class="card-count">${card.display}</div>
+                <div class="card-time-ago">${formatTime(card.last)}</div>
             </div>
-
-            <button class="counter-btn plus-btn" data-id="${card.id}">+</button>
-            <div class="card-total">Totaal: ${card.totalValue}</div>
+            <button class="counter-btn plus" data-id="${card.id}" data-step="${step}">+</button>
+            <div class="card-total">Totaal: ${card.total}</div>
         `;
         container.appendChild(div);
     });
 
-    attachEventListeners();
+    // Event listeners voor de kaarten
+    document.querySelectorAll('.plus').forEach(b => b.onclick = () => addEvent(b.dataset.id, parseFloat(b.dataset.step)).then(renderCards));
+    document.querySelectorAll('.minus').forEach(b => b.onclick = () => addEvent(b.dataset.id, -parseFloat(b.dataset.step)).then(renderCards));
+    document.querySelectorAll('.edit-trigger').forEach(b => b.onclick = () => openEditModal(b.dataset.id));
 };
 
-const attachEventListeners = () => {
-    document.querySelectorAll('.plus-btn').forEach(btn => {
-        btn.onclick = async (e) => {
-            await addEventToDB(e.target.dataset.id, 1);
-            renderCards(); 
-        };
-    });
-
-    document.querySelectorAll('.minus-btn').forEach(btn => {
-        btn.onclick = async (e) => {
-            if (e.target.classList.contains('disabled')) return;
-            await addEventToDB(e.target.dataset.id, -1);
-            renderCards(); 
-        };
-    });
-
-    // NIEUW: Edit knop functionaliteit
-    document.querySelectorAll('.edit-card-btn').forEach(btn => {
-        btn.onclick = (e) => {
-            const cardId = e.currentTarget.dataset.id;
-            openModalForEdit(cardId);
-        };
-    });
-};
-
-// --- MODAL & CSV LOGIC ---
-const setupModal = () => {
-    const modal = document.getElementById('newCardModal');
-    const colorPicker = document.getElementById('colorPicker');
-    const modalTitle = document.querySelector('.modal-content h2');
-    const saveBtn = document.getElementById('saveCardBtn');
-    const titleInput = document.getElementById('cardTitleInput');
-    
-    // Render color swatches with data-color attributes
-    presetColors.forEach(color => {
-        const swatch = document.createElement('div');
-        swatch.className = 'color-swatch';
-        swatch.style.backgroundColor = color;
-        swatch.dataset.color = color; // Makkelijk terug te vinden
-        if (color === selectedModalColor) swatch.classList.add('selected');
-        
-        swatch.onclick = () => {
-            document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
-            swatch.classList.add('selected');
-            selectedModalColor = color;
-        };
-        colorPicker.appendChild(swatch);
-    });
-
-    // Modal open logic for NEW card
-    document.getElementById('openModalBtn').onclick = () => {
-        editingCardId = null; 
-        titleInput.value = ''; 
-        modalTitle.textContent = 'Nieuwe Kaart';
-        saveBtn.textContent = 'Aanmaken';
-
-        // Reset kleur
-        document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
-        document.querySelector(`.color-swatch[data-color="${presetColors[0]}"]`).classList.add('selected');
-        selectedModalColor = presetColors[0];
-
-        modal.classList.remove('hidden');
-        titleInput.focus();
-    };
-    
-    document.getElementById('cancelModalBtn').onclick = () => {
-        modal.classList.add('hidden');
-    };
-
-    // Modal save logic (voor zowel NIEUW als BEWERKEN)
-    document.getElementById('saveCardBtn').onclick = async () => {
-        const title = titleInput.value.trim();
-        if (title) {
-            if (editingCardId) {
-                await updateCardDetailsInDB(editingCardId, title, selectedModalColor);
-            } else {
-                await addCardToDB(title, selectedModalColor);
-            }
-            modal.classList.add('hidden');
-            renderCards();
-        } else {
-            alert('Vul a.u.b. een titel in.');
-        }
-    };
-};
-
-// NIEUW: Helper functie om modal te vullen met gegevens van bestaande kaart
-const openModalForEdit = async (cardId) => {
-    editingCardId = cardId;
-    const store = db.transaction(['cards'], 'readonly').objectStore('cards');
-    
-    store.get(cardId).onsuccess = (req) => {
-        const card = req.target.result;
-        
-        document.getElementById('cardTitleInput').value = card.name;
-        document.querySelector('.modal-content h2').textContent = 'Kaart Bewerken';
-        document.getElementById('saveCardBtn').textContent = 'Opslaan';
-
-        // Selecteer juiste kleur
-        selectedModalColor = card.color || presetColors[0];
-        document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
-        
-        const activeSwatch = document.querySelector(`.color-swatch[data-color="${selectedModalColor}"]`);
-        if (activeSwatch) activeSwatch.classList.add('selected');
-
-        document.getElementById('newCardModal').classList.remove('hidden');
-        document.getElementById('cardTitleInput').focus();
-    };
-};
-
-const exportToCSV = async () => {
+// --- MODAL LOGIC ---
+const openEditModal = async (id) => {
+    editingCardId = id;
     const cards = await getAllFromStore('cards');
-    const events = await getAllFromStore('events');
-    if (events.length === 0) return alert("Geen data om te exporteren.");
+    const card = cards.find(c => c.id === id);
+    if (!card) return;
 
-    const cardMap = {};
-    cards.forEach(card => cardMap[card.id] = card.name);
-
-    let csvContent = "data:text/csv;charset=utf-8,Date,Time,Card Name,Delta,Event ID\n";
-    events.forEach(ev => {
-        let cardName = `"${(cardMap[ev.cardId] || 'Unknown').replace(/"/g, '""')}"`; 
-        const timeStr = new Date(ev.timestamp).toLocaleTimeString();
-        csvContent += `${ev.date},${timeStr},${cardName},${ev.delta},${ev.id}\n`;
-    });
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.href = encodedUri;
-    link.download = `counter_export_${getTodayDateString()}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    document.getElementById('cardTitleInput').value = card.name;
+    document.getElementById('cardStartInput').value = card.startValue || 0;
+    document.getElementById('cardStepInput').value = card.stepValue || 1;
+    selectedModalColor = card.color;
+    
+    document.querySelector('#newCardModal h2').textContent = "Kaart Aanpassen";
+    document.getElementById('deleteActionArea').classList.remove('hidden');
+    updateColorSelection();
+    document.getElementById('newCardModal').classList.remove('hidden');
 };
 
-// --- INIT APP ---
-const initApp = async () => {
-    await initDB();
-    setupModal();
-    await renderCards();
+const setupModals = () => {
+    const mainModal = document.getElementById('newCardModal');
+    const confirmModal = document.getElementById('confirmDeleteModal');
+
+    // Kleur kiezer vullen
+    const picker = document.getElementById('colorPicker');
+    presetColors.forEach(col => {
+        const s = document.createElement('div');
+        s.className = 'color-swatch';
+        s.style.backgroundColor = col;
+        s.dataset.color = col;
+        s.onclick = () => { selectedModalColor = col; updateColorSelection(); };
+        picker.appendChild(s);
+    });
+
+    document.getElementById('openModalBtn').onclick = () => {
+        editingCardId = null;
+        document.getElementById('cardTitleInput').value = '';
+        document.getElementById('cardStartInput').value = 0;
+        document.getElementById('cardStepInput').value = 1;
+        document.querySelector('#newCardModal h2').textContent = "Nieuwe Kaart";
+        document.getElementById('deleteActionArea').classList.add('hidden');
+        mainModal.classList.remove('hidden');
+    };
+
+    document.getElementById('saveCardBtn').onclick = async () => {
+        const name = document.getElementById('cardTitleInput').value.trim();
+        if (!name) return alert("Naam verplicht");
+
+        let card;
+        if (editingCardId) {
+            const all = await getAllFromStore('cards');
+            card = all.find(c => c.id === editingCardId);
+            card.name = name; card.color = selectedModalColor;
+            card.startValue = parseFloat(document.getElementById('cardStartInput').value);
+            card.stepValue = parseFloat(document.getElementById('cardStepInput').value);
+        } else {
+            card = {
+                id: crypto.randomUUID(), name, color: selectedModalColor,
+                startValue: parseFloat(document.getElementById('cardStartInput').value),
+                stepValue: parseFloat(document.getElementById('cardStepInput').value),
+                deleted: false, orderIndex: Date.now()
+            };
+        }
+        await saveCard(card);
+        mainModal.classList.add('hidden');
+        renderCards();
+    };
+
+    document.getElementById('cancelModalBtn').onclick = () => mainModal.classList.add('hidden');
+
+    // VERWIJDER LOGICA
+    document.getElementById('deleteCardBtn').onclick = () => confirmModal.classList.remove('hidden');
+    document.getElementById('cancelDeleteBtn').onclick = () => confirmModal.classList.add('hidden');
+
+    document.getElementById('confirmDeleteBtn').onclick = async () => {
+        if (!editingCardId) return;
+        const all = await getAllFromStore('cards');
+        const card = all.find(c => c.id === editingCardId);
+        if (card) {
+            card.deleted = true;
+            await saveCard(card);
+        }
+        confirmModal.classList.add('hidden');
+        mainModal.classList.add('hidden');
+        renderCards();
+    };
+};
+
+// --- HELPERS ---
+const updateColorSelection = () => {
+    document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color === selectedModalColor));
+};
+
+const getPeriods = () => {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const h = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
+    const w = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay()||7) + 1).getTime();
+    const m = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const y = new Date(now.getFullYear(), 0, 1).getTime();
+    return { h, d, w, m, y };
+};
+
+const formatTime = (ts) => {
+    if (!ts) return "Nog geen clicks";
+    const diff = (Date.now() - new Date(ts).getTime()) / 60000;
+    if (diff < 1) return "Zojuist";
+    if (diff < 60) return Math.floor(diff) + "m geleden";
+    if (diff < 1440) return Math.floor(diff/60) + "u geleden";
+    return new Date(ts).toLocaleDateString();
+};
+
+const setupToggles = () => {
+    const frameBtn = document.getElementById('timeframeBtn');
+    const menu = document.getElementById('timeframeMenu');
+    
+    document.body.classList.toggle('compact-mode', isCompactMode);
+    document.getElementById('compactBtn').classList.toggle('active', isCompactMode);
+    frameBtn.textContent = `[${currentTimeframe}]`;
+
+    document.getElementById('compactBtn').onclick = () => {
+        isCompactMode = !isCompactMode;
+        localStorage.setItem('compactMode', isCompactMode);
+        document.body.classList.toggle('compact-mode', isCompactMode);
+        document.getElementById('compactBtn').classList.toggle('active', isCompactMode);
+    };
+
+    frameBtn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); };
+    document.querySelectorAll('.dropdown-item').forEach(i => {
+        i.onclick = () => {
+            currentTimeframe = i.dataset.val;
+            localStorage.setItem('timeframe', currentTimeframe);
+            frameBtn.textContent = `[${currentTimeframe}]`;
+            menu.classList.add('hidden');
+            renderCards();
+        };
+    });
+    window.onclick = () => menu.classList.add('hidden');
+};
+
+// --- INIT ---
+initDB().then(() => {
+    setupModals();
+    setupToggles();
+    renderCards();
+    
+    document.getElementById('sortSelect').onchange = (e) => {
+        currentSort = e.target.value;
+        localStorage.setItem('sortMethod', currentSort);
+        renderCards();
+    };
 
     const container = document.getElementById('cardContainer');
     new Sortable(container, {
-        handle: '.drag-handle',
-        animation: 150,
-        disabled: currentSort !== 'manual',
-        onEnd: async function () {
-            const itemEls = Array.from(container.children);
-            for (let i = 0; i < itemEls.length; i++) {
-                await updateCardOrderInDB(itemEls[i].dataset.id, i);
+        handle: '.drag-handle', animation: 150,
+        onEnd: async () => {
+            const items = Array.from(container.children);
+            const cards = await getAllFromStore('cards');
+            for(let i=0; i<items.length; i++) {
+                const card = cards.find(c => c.id === items[i].dataset.id);
+                if (card) { card.orderIndex = i; await saveCard(card); }
             }
         }
     });
-
-    document.getElementById('sortSelect').addEventListener('change', (e) => {
-        currentSort = e.target.value;
-        localStorage.setItem('sortMethod', currentSort);
-        location.reload(); 
-    });
-
-    document.getElementById('exportBtn').addEventListener('click', exportToCSV);
-};
-
-initApp();
+});
