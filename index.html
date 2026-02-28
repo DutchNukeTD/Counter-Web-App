@@ -35,53 +35,51 @@
             <button id="exportBtn" class="secondary-btn">⬇ CSV</button>
             <button id="openModalBtn" class="primary-btn">+ New Card</button>
         </div>
+
+        <div class="tabs-container">
+            <button id="archiveTab" class="tab-btn">Archive</button>
+            <button id="favoritesTab" class="tab-btn active">Favorites</button>
+        </div>
     </header>
 
-    <main>
+    <main id="mainContent">
         <div id="cardContainer"></div>
     </main>
 
     <div id="newCardModal" class="modal hidden">
         <div class="modal-content">
             <h2>Nieuwe Kaart</h2>
-            
             <input type="text" id="cardTitleInput" placeholder="Titel van de kaart" autocomplete="off">
-            
-            <p class="color-label">Instellingen:</p>
             <div class="modal-row">
                 <div class="modal-col">
-                    <label for="cardStartInput">Startwaarde</label>
+                    <label>Startwaarde</label>
                     <input type="number" id="cardStartInput" value="0">
                 </div>
                 <div class="modal-col">
-                    <label for="cardStepInput">Stapgrootte</label>
+                    <label>Stapgrootte</label>
                     <input type="number" id="cardStepInput" value="1">
                 </div>
             </div>
-
             <p class="color-label">Kies een kleur:</p>
             <div id="colorPicker" class="color-grid"></div>
-
             <div class="modal-actions">
                 <button id="cancelModalBtn" class="secondary-btn">Annuleren</button>
                 <button id="saveCardBtn" class="primary-btn">Opslaan</button>
             </div>
-            
-            <div id="deleteActionArea" class="modal-actions-delete hidden">
-                <button id="deleteCardBtn" class="danger-btn">Kaart Verwijderen</button>
+            <div id="editActionsArea" class="modal-actions-edit hidden">
+                <button id="deleteCardBtn" class="danger-btn-outline">Verwijderen</button>
+                <button id="archiveCardBtn" class="secondary-btn">Archiveer</button>
             </div>
         </div>
     </div>
 
     <div id="confirmDeleteModal" class="modal hidden" style="z-index: 1100;">
-        <div class="modal-content" style="text-align: center; border: 2px solid #dc3545;">
-            <h3 style="color: #dc3545; margin-bottom: 1rem;">Weet je het zeker?</h3>
-            <p style="margin-bottom: 1.5rem; color: #555; line-height: 1.4;">
-                De kaart wordt verborgen in de app. De historie blijft wel bewaard voor je CSV-export.
-            </p>
-            <div class="modal-actions" style="justify-content: center; gap: 1rem;">
-                <button id="cancelDeleteBtn" class="secondary-btn">Nee, terug</button>
-                <button id="confirmDeleteBtn" class="danger-btn" style="padding: 0.8rem 1.5rem;">Ja, verwijder</button>
+        <div class="modal-content danger-zone">
+            <h3>Kaart Verwijderen?</h3>
+            <p>De kaart wordt volledig verborgen. De historie blijft in de CSV.</p>
+            <div class="modal-actions">
+                <button id="cancelDeleteBtn" class="secondary-btn">Terug</button>
+                <button id="confirmDeleteBtn" class="danger-btn">Verwijder</button>
             </div>
         </div>
     </div>
