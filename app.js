@@ -1,18 +1,16 @@
-// --- CONFIG & STATE ---
 const dbName = 'CounterAppDB';
 let db;
 let currentSort = localStorage.getItem('sortMethod') || 'manual';
 let isCompactMode = localStorage.getItem('compactMode') === 'true';
 let currentTimeframe = localStorage.getItem('timeframe') || 'V';
-const timeframes = ['U', 'V', 'W', 'M', 'J'];
+let currentTab = 'Favorites';
 
 const presetColors = ['#FADCD9', '#F8E2CF', '#F5EECC', '#C9E4DE', '#C6DEF1', '#DBCDF0', '#F2C6DE', '#F7D9C4', '#E2E2E2', '#C1E1C1', '#F0E6EF', '#E2D1F9'];
 let selectedModalColor = presetColors[0];
 let editingCardId = null;
 
-// --- DB CORE ---
 const initDB = () => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const request = indexedDB.open(dbName, 1);
         request.onupgradeneeded = (e) => {
             db = e.target.result;
@@ -23,7 +21,6 @@ const initDB = () => {
             }
         };
         request.onsuccess = (e) => { db = e.target.result; resolve(); };
-        request.onerror = (e) => reject(e);
     });
 };
 
@@ -35,139 +32,126 @@ const getAllFromStore = (storeName) => {
     });
 };
 
-// --- DATA ACTIONS ---
 const saveCard = (card) => {
     return new Promise((resolve) => {
         const store = db.transaction(['cards'], 'readwrite').objectStore('cards');
-        const req = store.put(card);
-        req.onsuccess = () => resolve();
+        store.put(card).onsuccess = () => resolve();
     });
 };
 
-const addEvent = (cardId, delta) => {
-    return new Promise((resolve) => {
-        const event = {
-            id: crypto.randomUUID(), cardId: cardId,
-            timestamp: new Date().toISOString(),
-            date: new Date().toISOString().split('T')[0],
-            delta: delta
-        };
-        const store = db.transaction(['events'], 'readwrite').objectStore('events');
-        store.add(event).onsuccess = () => resolve();
-    });
+window.addEv = async (id, delta) => {
+    const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
+    const store = db.transaction(['events'], 'readwrite').objectStore('events');
+    store.add(event).onsuccess = () => renderCards();
 };
 
-// --- UI RENDER ---
-const renderCards = async () => {
+const renderCards = async (containerElement = document.getElementById('cardContainer')) => {
     const allCards = await getAllFromStore('cards');
-    const cards = allCards.filter(c => !c.deleted);
     const events = await getAllFromStore('events');
-
+    
+    const isArchiveTab = currentTab === 'Archive';
+    const cards = allCards.filter(c => !c.deleted && (isArchiveTab ? c.archived : !c.archived));
     const periods = getPeriods();
     const stats = {};
-    cards.forEach(c => stats[c.id] = { valU:0, valV:0, valW:0, valM:0, valJ:0, total:0, last:null });
+    cards.forEach(c => stats[c.id] = { val: 0, total: 0, last: null });
 
     events.forEach(ev => {
         if (!stats[ev.cardId]) return;
         const time = new Date(ev.timestamp).getTime();
         stats[ev.cardId].total += ev.delta;
-        if (time >= periods.h) stats[ev.cardId].valU += ev.delta;
-        if (time >= periods.d) stats[ev.cardId].valV += ev.delta;
-        if (time >= periods.w) stats[ev.cardId].valW += ev.delta;
-        if (time >= periods.m) stats[ev.cardId].valM += ev.delta;
-        if (time >= periods.y) stats[ev.cardId].valJ += ev.delta;
+        if (time >= periods[currentTimeframe.toLowerCase()]) stats[ev.cardId].val += ev.delta;
         if (!stats[ev.cardId].last || time > new Date(stats[ev.cardId].last).getTime()) stats[ev.cardId].last = ev.timestamp;
     });
 
-    const key = 'val' + currentTimeframe;
     const list = cards.map(c => ({
-        ...c,
-        display: (c.startValue || 0) + stats[c.id][key],
-        total: (c.startValue || 0) + stats[c.id].total,
-        last: stats[c.id].last
+        ...c, display: (c.startValue || 0) + stats[c.id].val,
+        total: (c.startValue || 0) + stats[c.id].total, last: stats[c.id].last
     }));
 
     if (currentSort === 'alphabetical') list.sort((a,b) => a.name.localeCompare(b.name));
     else if (currentSort === 'highest') list.sort((a,b) => b.display - a.display);
     else list.sort((a,b) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
-    const container = document.getElementById('cardContainer');
-    container.innerHTML = '';
-    
+    containerElement.innerHTML = '';
     list.forEach(card => {
-        const step = card.stepValue || 1;
         const div = document.createElement('div');
         div.className = 'card';
         div.style.backgroundColor = card.color;
+        div.dataset.id = card.id;
+        
+        // Alleen de absolute datum/tijd gebruiken
+        const fDate = card.last ? new Date(card.last).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Geen clicks';
+        
         div.innerHTML = `
             <div class="drag-handle" style="display: ${currentSort==='manual'?'block':'none'}">☰</div>
-            <button class="counter-btn minus" data-id="${card.id}" data-step="${step}">-</button>
+            <button class="counter-btn" onclick="addEv('${card.id}', -${card.stepValue || 1})">-</button>
             <div class="card-center">
-                <div class="card-title-container edit-trigger" data-id="${card.id}">
-                    <span class="card-title">${card.name}</span> ✏️
+                <div onclick="openEditModal('${card.id}')" style="cursor:pointer">
+                    <span class="card-title">${card.name} ✏️</span>
                 </div>
                 <div class="card-count">${card.display}</div>
-                <div class="card-time-ago">${formatTime(card.last)}</div>
+                <span class="card-datetime">${fDate}</span>
             </div>
-            <button class="counter-btn plus" data-id="${card.id}" data-step="${step}">+</button>
+            <button class="counter-btn" onclick="addEv('${card.id}', ${card.stepValue || 1})">+</button>
             <div class="card-total">Totaal: ${card.total}</div>
         `;
-        container.appendChild(div);
+        containerElement.appendChild(div);
     });
-
-    // Event listeners voor de kaarten
-    document.querySelectorAll('.plus').forEach(b => b.onclick = () => addEvent(b.dataset.id, parseFloat(b.dataset.step)).then(renderCards));
-    document.querySelectorAll('.minus').forEach(b => b.onclick = () => addEvent(b.dataset.id, -parseFloat(b.dataset.step)).then(renderCards));
-    document.querySelectorAll('.edit-trigger').forEach(b => b.onclick = () => openEditModal(b.dataset.id));
 };
 
-// --- MODAL LOGIC ---
-const openEditModal = async (id) => {
+const switchTab = (newTab) => {
+    if (currentTab === newTab) return;
+    const mainContent = document.getElementById('mainContent');
+    const oldContainer = document.getElementById('cardContainer');
+    const clone = oldContainer.cloneNode(true);
+    clone.id = ''; 
+    clone.classList.add('card-container-clone');
+    mainContent.appendChild(clone);
+    const goingToArchive = (newTab === 'Archive');
+    clone.classList.add(goingToArchive ? 'slide-out-to-right' : 'slide-out-to-left');
+    currentTab = newTab;
+    document.getElementById('archiveTab').classList.toggle('active', newTab === 'Archive');
+    document.getElementById('favoritesTab').classList.toggle('active', newTab === 'Favorites');
+    renderCards(oldContainer);
+    oldContainer.className = goingToArchive ? 'slide-in-from-left' : 'slide-in-from-right';
+    setTimeout(() => {
+        clone.remove();
+        oldContainer.className = ''; 
+    }, 350);
+};
+
+const setupTabs = () => {
+    document.getElementById('archiveTab').onclick = () => switchTab('Archive');
+    document.getElementById('favoritesTab').onclick = () => switchTab('Favorites');
+};
+
+window.openEditModal = async (id) => {
     editingCardId = id;
     const cards = await getAllFromStore('cards');
     const card = cards.find(c => c.id === id);
-    if (!card) return;
-
     document.getElementById('cardTitleInput').value = card.name;
     document.getElementById('cardStartInput').value = card.startValue || 0;
     document.getElementById('cardStepInput').value = card.stepValue || 1;
     selectedModalColor = card.color;
-    
-    document.querySelector('#newCardModal h2').textContent = "Kaart Aanpassen";
-    document.getElementById('deleteActionArea').classList.remove('hidden');
+    document.getElementById('archiveCardBtn').textContent = card.archived ? 'Herstel naar Fav' : 'Archiveer';
+    document.getElementById('editActionsArea').classList.remove('hidden');
     updateColorSelection();
     document.getElementById('newCardModal').classList.remove('hidden');
 };
 
 const setupModals = () => {
     const mainModal = document.getElementById('newCardModal');
-    const confirmModal = document.getElementById('confirmDeleteModal');
-
-    // Kleur kiezer vullen
-    const picker = document.getElementById('colorPicker');
-    presetColors.forEach(col => {
-        const s = document.createElement('div');
-        s.className = 'color-swatch';
-        s.style.backgroundColor = col;
-        s.dataset.color = col;
-        s.onclick = () => { selectedModalColor = col; updateColorSelection(); };
-        picker.appendChild(s);
-    });
-
     document.getElementById('openModalBtn').onclick = () => {
         editingCardId = null;
         document.getElementById('cardTitleInput').value = '';
         document.getElementById('cardStartInput').value = 0;
         document.getElementById('cardStepInput').value = 1;
-        document.querySelector('#newCardModal h2').textContent = "Nieuwe Kaart";
-        document.getElementById('deleteActionArea').classList.add('hidden');
+        document.getElementById('editActionsArea').classList.add('hidden');
         mainModal.classList.remove('hidden');
     };
-
     document.getElementById('saveCardBtn').onclick = async () => {
         const name = document.getElementById('cardTitleInput').value.trim();
-        if (!name) return alert("Naam verplicht");
-
+        if (!name) return;
         let card;
         if (editingCardId) {
             const all = await getAllFromStore('cards');
@@ -176,107 +160,89 @@ const setupModals = () => {
             card.startValue = parseFloat(document.getElementById('cardStartInput').value);
             card.stepValue = parseFloat(document.getElementById('cardStepInput').value);
         } else {
-            card = {
-                id: crypto.randomUUID(), name, color: selectedModalColor,
-                startValue: parseFloat(document.getElementById('cardStartInput').value),
-                stepValue: parseFloat(document.getElementById('cardStepInput').value),
-                deleted: false, orderIndex: Date.now()
-            };
+            card = { id: crypto.randomUUID(), name, color: selectedModalColor, startValue: parseFloat(document.getElementById('cardStartInput').value), stepValue: parseFloat(document.getElementById('cardStepInput').value), archived: false, deleted: false, orderIndex: Date.now() };
         }
         await saveCard(card);
         mainModal.classList.add('hidden');
         renderCards();
     };
-
-    document.getElementById('cancelModalBtn').onclick = () => mainModal.classList.add('hidden');
-
-    // VERWIJDER LOGICA
-    document.getElementById('deleteCardBtn').onclick = () => confirmModal.classList.remove('hidden');
-    document.getElementById('cancelDeleteBtn').onclick = () => confirmModal.classList.add('hidden');
-
-    document.getElementById('confirmDeleteBtn').onclick = async () => {
-        if (!editingCardId) return;
+    document.getElementById('archiveCardBtn').onclick = async () => {
         const all = await getAllFromStore('cards');
         const card = all.find(c => c.id === editingCardId);
-        if (card) {
-            card.deleted = true;
-            await saveCard(card);
-        }
-        confirmModal.classList.add('hidden');
+        card.archived = !card.archived;
+        await saveCard(card);
         mainModal.classList.add('hidden');
         renderCards();
     };
-};
-
-// --- HELPERS ---
-const updateColorSelection = () => {
-    document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color === selectedModalColor));
+    document.getElementById('deleteCardBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.remove('hidden');
+    document.getElementById('confirmDeleteBtn').onclick = async () => {
+        const all = await getAllFromStore('cards');
+        const card = all.find(c => c.id === editingCardId);
+        if (card) { card.deleted = true; await saveCard(card); }
+        document.getElementById('confirmDeleteModal').classList.add('hidden');
+        mainModal.classList.add('hidden');
+        renderCards();
+    };
+    document.getElementById('cancelModalBtn').onclick = () => mainModal.classList.add('hidden');
+    document.getElementById('cancelDeleteBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.add('hidden');
 };
 
 const getPeriods = () => {
     const now = new Date();
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const h = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
+    const u = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
     const w = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay()||7) + 1).getTime();
     const m = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const y = new Date(now.getFullYear(), 0, 1).getTime();
-    return { h, d, w, m, y };
+    const j = new Date(now.getFullYear(), 0, 1).getTime();
+    return { u, v: d, w, m, j };
 };
 
-const formatTime = (ts) => {
-    if (!ts) return "Nog geen clicks";
-    const diff = (Date.now() - new Date(ts).getTime()) / 60000;
-    if (diff < 1) return "Zojuist";
-    if (diff < 60) return Math.floor(diff) + "m geleden";
-    if (diff < 1440) return Math.floor(diff/60) + "u geleden";
-    return new Date(ts).toLocaleDateString();
+const updateColorSelection = () => {
+    document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color === selectedModalColor));
 };
 
-const setupToggles = () => {
-    const frameBtn = document.getElementById('timeframeBtn');
-    const menu = document.getElementById('timeframeMenu');
-    
-    document.body.classList.toggle('compact-mode', isCompactMode);
-    document.getElementById('compactBtn').classList.toggle('active', isCompactMode);
-    frameBtn.textContent = `[${currentTimeframe}]`;
-
-    document.getElementById('compactBtn').onclick = () => {
+initDB().then(() => {
+    setupModals();
+    setupTabs();
+    const picker = document.getElementById('colorPicker');
+    presetColors.forEach(col => {
+        const s = document.createElement('div');
+        s.className = 'color-swatch'; s.style.backgroundColor = col; s.dataset.color = col;
+        s.onclick = () => { selectedModalColor = col; updateColorSelection(); };
+        picker.appendChild(s);
+    });
+    const compactBtn = document.getElementById('compactBtn');
+    compactBtn.onclick = () => {
         isCompactMode = !isCompactMode;
         localStorage.setItem('compactMode', isCompactMode);
         document.body.classList.toggle('compact-mode', isCompactMode);
-        document.getElementById('compactBtn').classList.toggle('active', isCompactMode);
+        compactBtn.classList.toggle('active', isCompactMode);
     };
-
-    frameBtn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); };
-    document.querySelectorAll('.dropdown-item').forEach(i => {
-        i.onclick = () => {
-            currentTimeframe = i.dataset.val;
+    if (isCompactMode) { document.body.classList.add('compact-mode'); compactBtn.classList.add('active'); }
+    const tfBtn = document.getElementById('timeframeBtn');
+    const tfMenu = document.getElementById('timeframeMenu');
+    tfBtn.textContent = `[${currentTimeframe}]`;
+    tfBtn.onclick = (e) => { e.stopPropagation(); tfMenu.classList.toggle('hidden'); };
+    document.querySelectorAll('.dropdown-item').forEach(item => {
+        item.onclick = () => {
+            currentTimeframe = item.dataset.val;
             localStorage.setItem('timeframe', currentTimeframe);
-            frameBtn.textContent = `[${currentTimeframe}]`;
-            menu.classList.add('hidden');
+            tfBtn.textContent = `[${currentTimeframe}]`;
+            tfMenu.classList.add('hidden');
             renderCards();
         };
     });
-    window.onclick = () => menu.classList.add('hidden');
-};
-
-// --- INIT ---
-initDB().then(() => {
-    setupModals();
-    setupToggles();
-    renderCards();
-    
+    window.onclick = () => tfMenu.classList.add('hidden');
     document.getElementById('sortSelect').onchange = (e) => {
         currentSort = e.target.value;
         localStorage.setItem('sortMethod', currentSort);
         renderCards();
     };
-
-    const container = document.getElementById('cardContainer');
-    new Sortable(container, {
+    renderCards();
+    new Sortable(document.getElementById('cardContainer'), {
         handle: '.drag-handle', animation: 150,
         onEnd: async () => {
-            const items = Array.from(container.children);
+            const items = Array.from(document.getElementById('cardContainer').children);
             const cards = await getAllFromStore('cards');
             for(let i=0; i<items.length; i++) {
                 const card = cards.find(c => c.id === items[i].dataset.id);
