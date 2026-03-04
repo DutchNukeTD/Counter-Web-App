@@ -123,4 +123,3 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 .event-time-input { padding: 0.3rem; border: 1px solid #ccc; border-radius: 6px; font-size: 0.8rem; color: #333; flex-grow: 1; margin: 0 0.5rem; }
 .event-delete-btn { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: #bbb; transition: 0.2s; padding: 0.2rem; }
 .event-delete-btn:hover { color: var(--danger); }
-
