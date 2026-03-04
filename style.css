@@ -6,19 +6,9 @@
     --success: #28a745;
 }
 
-* { 
-    box-sizing: border-box; 
-    margin: 0; 
-    padding: 0; 
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-}
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 
-body { 
-    background-color: var(--bg-color); 
-    color: var(--text); 
-    padding: 1rem; 
-    overflow-x: hidden; 
-}
+body { background-color: var(--bg-color); color: var(--text); padding: 1rem; overflow-x: hidden; }
 
 /* --- HEADER & TABS --- */
 header { margin-bottom: 1.5rem; }
@@ -26,37 +16,28 @@ header { margin-bottom: 1.5rem; }
 .view-toggles { display: flex; gap: 0.6rem; }
 
 .dropdown-container { position: relative; }
-.dropdown-menu {
-    position: absolute; top: 115%; right: 0; background: white; border-radius: 12px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.15); z-index: 100; display: flex; flex-direction: column;
-    min-width: 140px; border: 1px solid #eee; overflow: hidden;
-}
+.dropdown-menu { position: absolute; top: 115%; right: 0; background: white; border-radius: 12px; box-shadow: 0 8px 20px rgba(0,0,0,0.15); z-index: 100; display: flex; flex-direction: column; min-width: 140px; border: 1px solid #eee; overflow: hidden; }
 .dropdown-menu.hidden { display: none; }
 .dropdown-item { padding: 0.9rem 1.2rem; cursor: pointer; font-size: 0.95rem; border-bottom: 1px solid #f5f5f5; font-weight: 600; color: #444; }
 
-.icon-btn {
-    background: white; border: 2px solid #ddd; border-radius: 10px; font-weight: bold; cursor: pointer; color: #555; width: 44px; height: 44px;
-}
+.icon-btn { background: white; border: 2px solid #ddd; border-radius: 10px; font-weight: bold; cursor: pointer; color: #555; width: 44px; height: 44px; }
 .icon-btn.active { background: #333; color: white; border-color: #333; }
 
-.controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; transition: opacity 0.3s; }
 select, .primary-btn, .secondary-btn { flex-grow: 1; padding: 0.8rem; border-radius: 10px; cursor: pointer; font-weight: bold; }
 .primary-btn { background: var(--primary); color: white; border: none; }
 .secondary-btn { background: white; color: var(--primary); border: 2px solid var(--primary); }
 
 .tabs-container { display: flex; gap: 0.5rem; border-bottom: 2px solid #ddd; margin-bottom: 1rem; position: relative; z-index: 10; }
-.tab-btn { flex: 1; padding: 0.8rem; border: none; background: none; font-weight: bold; color: #888; cursor: pointer; }
+.tab-btn { flex: 1; padding: 0.8rem 0.4rem; border: none; background: none; font-weight: bold; color: #888; cursor: pointer; font-size: 0.95rem; }
 .tab-btn.active { color: var(--primary); border-bottom: 3px solid var(--primary); }
 
-/* --- ANIMATIE ENGINE --- */
+/* --- ANIMATIE ENGINE & CONTAINERS --- */
 #mainContent { position: relative; width: 100%; min-height: 400px; }
-#cardContainer { display: flex; flex-direction: column; gap: 1rem; width: 100%; }
+#cardContainer, #dashboardContainer { display: flex; flex-direction: column; gap: 1rem; width: 100%; }
+.hidden-tab { display: none !important; }
 
-.card-container-clone {
-    position: absolute; top: 0; left: 0; width: 100%;
-    display: flex; flex-direction: column; gap: 1rem;
-    pointer-events: none; z-index: 5;
-}
+.card-container-clone { position: absolute; top: 0; left: 0; width: 100%; display: flex; flex-direction: column; gap: 1rem; pointer-events: none; z-index: 5; }
 
 .slide-out-to-right { animation: slideOutRight 0.35s ease-in-out forwards; }
 .slide-out-to-left { animation: slideOutLeft 0.35s ease-in-out forwards; }
@@ -68,17 +49,46 @@ select, .primary-btn, .secondary-btn { flex-grow: 1; padding: 0.8rem; border-rad
 @keyframes slideInLeft { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-/* --- CARD STYLING --- */
-.card {
-    position: relative; padding: 1rem; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-    display: flex; align-items: center; justify-content: space-between;
+/* --- DASHBOARD STYLING --- */
+.dashboard-filters { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.5rem; }
+.filter-chip { padding: 0.5rem 0.9rem; border-radius: 20px; font-size: 0.85rem; font-weight: 700; cursor: pointer; border: 2px solid transparent; opacity: 0.4; transition: all 0.2s; color: #333; }
+.filter-chip.active { opacity: 1; border-color: #333; transform: scale(1.05); }
+.chart-wrapper { background: white; padding: 1rem; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); width: 100%; height: 350px; }
+
+.dashboard-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+    align-items: center;
 }
+.time-presets select {
+    padding: 0.6rem;
+    border-radius: 10px;
+    border: 1px solid #ddd;
+    background: white;
+    font-weight: bold;
+    min-width: 180px;
+}
+#customDateRange {
+    display: flex;
+    gap: 0.5rem;
+}
+#customDateRange input {
+    padding: 0.5rem;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    font-size: 0.85rem;
+}
+.hidden { display: none !important; }
+
+/* --- CARD STYLING --- */
+.card { position: relative; padding: 1rem; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: space-between; }
 .drag-handle { margin-right: 12px; font-size: 1.4rem; color: rgba(0,0,0,0.2); cursor: grab; }
 .counter-btn { width: 54px; height: 54px; font-size: 30px; border-radius: 14px; border: none; background: rgba(255, 255, 255, 0.4); cursor: pointer; }
 .card-center { flex: 1; text-align: center; }
 .card-title { font-size: 16px; font-weight: 700; display: block; }
 .card-count { font-size: 26px; font-weight: 800; line-height: 1.1; }
-
 .card-datetime { font-size: 11px; font-weight: 700; color: #444; margin-top: 4px; display: block; }
 .card-total { position: absolute; top: 10px; right: 14px; font-size: 9px; font-weight: 600; opacity: 0.6; }
 
@@ -88,7 +98,7 @@ body.compact-mode .counter-btn { width: 44px; height: 44px; font-size: 22px; }
 body.compact-mode .card-count { font-size: 20px; }
 body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 
-/* --- MODALS --- */
+/* --- MODALS & HISTORY --- */
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 1rem; }
 .modal.hidden { display: none; }
 .modal-content { background: white; padding: 1.8rem; border-radius: 24px; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; }
@@ -104,11 +114,7 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 .danger-btn { background: var(--danger); color: white; border: none; padding: 0.8rem; border-radius: 10px; font-weight: bold; cursor: pointer; flex: 1; }
 .danger-btn-outline { background: none; color: var(--danger); border: 2px solid var(--danger); padding: 0.8rem; border-radius: 10px; font-weight: bold; cursor: pointer; flex: 1; }
 
-/* --- EVENT HISTORY --- */
-.event-history-list {
-    max-height: 140px; overflow-y: auto; background: #fafafa;
-    border: 1px solid #eee; border-radius: 8px; padding: 0.5rem; margin-bottom: 1.5rem;
-}
+.event-history-list { max-height: 140px; overflow-y: auto; background: #fafafa; border: 1px solid #eee; border-radius: 8px; padding: 0.5rem; margin-bottom: 1.5rem; }
 .event-row { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #eaeaea; }
 .event-row:last-child { border-bottom: none; }
 .event-delta { font-weight: bold; width: 30px; font-size: 0.9rem;}
@@ -117,3 +123,4 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 .event-time-input { padding: 0.3rem; border: 1px solid #ccc; border-radius: 6px; font-size: 0.8rem; color: #333; flex-grow: 1; margin: 0 0.5rem; }
 .event-delete-btn { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: #bbb; transition: 0.2s; padding: 0.2rem; }
 .event-delete-btn:hover { color: var(--danger); }
+
