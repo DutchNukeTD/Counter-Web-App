@@ -37,13 +37,36 @@
         </div>
 
         <div class="tabs-container">
-            <button id="archiveTab" class="tab-btn">Archive</button>
-            <button id="favoritesTab" class="tab-btn active">Favorites</button>
+            <button id="archiveTab" class="tab-btn">Archief</button>
+            <button id="favoritesTab" class="tab-btn active">Favorieten</button>
+            <button id="dashboardTab" class="tab-btn">Dashboard</button>
         </div>
     </header>
 
     <main id="mainContent">
         <div id="cardContainer"></div>
+        <div id="dashboardContainer" class="hidden-tab">
+            <div class="dashboard-header">
+                <div class="time-presets">
+                    <select id="dashboardPreset" onchange="handlePresetChange(this.value)">
+                        <option value="14d">Afgelopen 14 dagen</option>
+                        <option value="month">Huidige maand</option>
+                        <option value="3m">Afgelopen 3 maanden</option>
+                        <option value="6m">Afgelopen half jaar</option>
+                        <option value="1y">Afgelopen jaar</option>
+                        <option value="custom">Aangepaste periode...</option>
+                    </select>
+                </div>
+                <div id="customDateRange" class="hidden">
+                    <input type="date" id="dashStart" onchange="renderDashboard()">
+                    <input type="date" id="dashEnd" onchange="renderDashboard()">
+                </div>
+            </div>
+            <div class="dashboard-filters" id="dashboardFilters"></div>
+            <div class="chart-wrapper">
+                <canvas id="myChart"></canvas>
+            </div>
+        </div>
     </main>
 
     <div id="newCardModal" class="modal hidden">
@@ -83,6 +106,8 @@
             </div>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script src="app.js"></script>
 </body>
