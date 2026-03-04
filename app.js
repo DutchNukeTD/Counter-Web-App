@@ -1,18 +1,24 @@
+/**
+ * Counter App - Volledig Script
+ * Inclusief: Verbeterde Dashboard-tijdlijn, IndexedDB, Animaties en Sortering
+ */
+
 const dbName = 'CounterAppDB';
 let db;
 let currentSort = localStorage.getItem('sortMethod') || 'manual';
 let isCompactMode = localStorage.getItem('compactMode') === 'true';
 let currentTimeframe = localStorage.getItem('timeframe') || 'V';
-let currentTab = 'Favorites';
+let currentTab = 'Favorites'; // Opties: 'Archive', 'Favorites', 'Dashboard'
 
 const presetColors = ['#FADCD9', '#F8E2CF', '#F5EECC', '#C9E4DE', '#C6DEF1', '#DBCDF0', '#F2C6DE', '#F7D9C4', '#E2E2E2', '#C1E1C1', '#F0E6EF', '#E2D1F9'];
 let selectedModalColor = presetColors[0];
 let editingCardId = null;
 
+// Dashboard State
 let chartInstance = null;
 let selectedDashboardCards = [];
 
-// --- DATABASE ---
+// --- 1. DATABASE INITIALISATIE ---
 const initDB = () => {
     return new Promise((resolve) => {
         const request = indexedDB.open(dbName, 1);
@@ -57,9 +63,14 @@ const deleteEventFromDB = (id) => {
     });
 };
 
-// --- EVENTS ---
+// --- 2. CLICK EVENTS & HISTORIE ---
 window.addEv = async (id, delta) => {
-    const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
+    const event = { 
+        id: crypto.randomUUID(), 
+        cardId: id, 
+        timestamp: new Date().toISOString(), 
+        delta: delta 
+    };
     await saveEventStore(event);
     renderCards();
     if(currentTab === 'Dashboard') renderDashboard();
@@ -72,17 +83,18 @@ window.updateEventTimestamp = async (eventId, newLocalTime) => {
         event.timestamp = new Date(newLocalTime).toISOString();
         await saveEventStore(event);
         renderCards(); 
+        if(currentTab === 'Dashboard') renderDashboard();
     }
 };
 
 window.removeEvent = async (eventId) => {
     await deleteEventFromDB(eventId);
-    renderEventHistory(editingCardId); 
+    if (editingCardId) renderEventHistory(editingCardId); 
     renderCards(); 
     if(currentTab === 'Dashboard') renderDashboard();
 };
 
-// --- RENDERING ---
+// --- 3. RENDERING KAARTEN (LIJST WEERGAVE) ---
 const renderCards = async () => {
     const containerElement = document.getElementById('cardContainer');
     const allCards = await getAllFromStore('cards');
@@ -92,6 +104,7 @@ const renderCards = async () => {
     const cards = allCards.filter(c => !c.deleted && (isArchiveTab ? c.archived : !c.archived));
     const periods = getPeriods();
     const stats = {};
+    
     cards.forEach(c => stats[c.id] = { val: 0, total: 0, last: null });
 
     events.forEach(ev => {
@@ -103,8 +116,10 @@ const renderCards = async () => {
     });
 
     const list = cards.map(c => ({
-        ...c, display: (c.startValue || 0) + stats[c.id].val,
-        total: (c.startValue || 0) + stats[c.id].total, last: stats[c.id].last
+        ...c, 
+        display: (c.startValue || 0) + stats[c.id].val,
+        total: (c.startValue || 0) + stats[c.id].total, 
+        last: stats[c.id].last
     }));
 
     if (currentSort === 'alphabetical') list.sort((a,b) => a.name.localeCompare(b.name));
@@ -134,7 +149,14 @@ const renderCards = async () => {
     });
 };
 
-// --- DASHBOARD TIJD LOGICA ---
+// --- 4. DASHBOARD LOGICA (MET FIX VOOR 'VANDAAG') ---
+
+// Helper om datum-input correct (lokaal) om te zetten
+const parseInputDate = (dateStr) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+};
+
 window.handlePresetChange = (val) => {
     const customDiv = document.getElementById('customDateRange');
     const now = new Date();
@@ -143,7 +165,10 @@ window.handlePresetChange = (val) => {
 
     customDiv.classList.add('hidden');
 
-    if (val === '14d') {
+    if (val === 'today') {
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    } else if (val === '14d') {
         start.setDate(now.getDate() - 14);
     } else if (val === 'month') {
         start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -155,11 +180,12 @@ window.handlePresetChange = (val) => {
         start.setFullYear(now.getFullYear() - 1);
     } else if (val === 'custom') {
         customDiv.classList.remove('hidden');
-        return; // Wacht op input van gebruiker
+        return; 
     }
 
-    document.getElementById('dashStart').value = start.toISOString().split('T')[0];
-    document.getElementById('dashEnd').value = end.toISOString().split('T')[0];
+    const toStr = (d) => `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+    document.getElementById('dashStart').value = toStr(start);
+    document.getElementById('dashEnd').value = toStr(end);
     renderDashboard();
 };
 
@@ -168,15 +194,20 @@ const renderDashboard = async () => {
     const events = await getAllFromStore('events');
     const activeCards = allCards.filter(c => !c.deleted);
 
-    const startDate = new Date(document.getElementById('dashStart').value);
-    const endDate = new Date(document.getElementById('dashEnd').value);
+    const startStr = document.getElementById('dashStart').value;
+    const endStr = document.getElementById('dashEnd').value;
+    
+    const startDate = parseInputDate(startStr);
+    const endDate = parseInputDate(endStr);
     endDate.setHours(23, 59, 59, 999);
+
+    const isSingleDay = startStr === endStr;
 
     if (selectedDashboardCards.length === 0 && activeCards.length > 0) {
         selectedDashboardCards = activeCards.slice(0, 5).map(c => c.id);
     }
 
-    // Filters bouwen
+    // Filter Chips
     const filtersDiv = document.getElementById('dashboardFilters');
     filtersDiv.innerHTML = '';
     activeCards.forEach(card => {
@@ -192,42 +223,60 @@ const renderDashboard = async () => {
         filtersDiv.appendChild(chip);
     });
 
-    // Data groeperen
-    const diffDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
     const labels = [];
     const dataByCard = {};
     selectedDashboardCards.forEach(id => dataByCard[id] = []);
 
-    if (diffDays <= 31) {
-        // Groepeer per dag
-        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-            labels.push(d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }));
+    if (isSingleDay) {
+        // UURSWEERGAVE
+        for (let h = 0; h < 24; h++) {
+            labels.push(`${h.toString().padStart(2, '0')}:00`);
             selectedDashboardCards.forEach(id => {
-                const dayTotal = events.filter(e => e.cardId === id && new Date(e.timestamp).toDateString() === d.toDateString())
-                                       .reduce((sum, e) => sum + e.delta, 0);
-                dataByCard[id].push(dayTotal);
+                const hourTotal = events.filter(e => {
+                    const et = new Date(e.timestamp);
+                    return e.cardId === id && 
+                           et.getFullYear() === startDate.getFullYear() &&
+                           et.getMonth() === startDate.getMonth() &&
+                           et.getDate() === startDate.getDate() &&
+                           et.getHours() === h;
+                }).reduce((sum, e) => sum + e.delta, 0);
+                dataByCard[id].push(hourTotal);
             });
         }
     } else {
-        // Groepeer per week voor overzichtelijkheid
-        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 7)) {
-            const weekEnd = new Date(d); weekEnd.setDate(d.getDate() + 7);
-            labels.push("W" + getWeekNumber(d));
-            selectedDashboardCards.forEach(id => {
-                const weekTotal = events.filter(e => {
-                    const et = new Date(e.timestamp);
-                    return e.cardId === id && et >= d && et < weekEnd;
-                }).reduce((sum, e) => sum + e.delta, 0);
-                dataByCard[id].push(weekTotal);
-            });
+        // DAGWEERGAVE OF WEEKWEERGAVE
+        const diffDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 31) {
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                labels.push(d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }));
+                selectedDashboardCards.forEach(id => {
+                    const dayTotal = events.filter(e => e.cardId === id && new Date(e.timestamp).toDateString() === d.toDateString())
+                                           .reduce((sum, e) => sum + e.delta, 0);
+                    dataByCard[id].push(dayTotal);
+                });
+            }
+        } else {
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 7)) {
+                labels.push("W" + getWeekNumber(d));
+                selectedDashboardCards.forEach(id => {
+                    const nextW = new Date(d); nextW.setDate(d.getDate() + 7);
+                    const weekTotal = events.filter(e => {
+                        const et = new Date(e.timestamp);
+                        return e.cardId === id && et >= d && et < nextW;
+                    }).reduce((sum, e) => sum + e.delta, 0);
+                    dataByCard[id].push(weekTotal);
+                });
+            }
         }
     }
 
     const datasets = selectedDashboardCards.map(id => {
         const card = activeCards.find(c => c.id === id);
         return {
-            label: card.name, data: dataByCard[id], borderColor: card.color === '#E2E2E2' ? '#999' : card.color,
-            backgroundColor: card.color, tension: 0.3, borderWidth: 3, pointRadius: diffDays > 60 ? 0 : 3
+            label: card.name, data: dataByCard[id], 
+            borderColor: (card.color === '#E2E2E2' || card.color === '#F5EECC') ? '#999' : card.color,
+            backgroundColor: card.color, tension: 0.4, borderWidth: 3, 
+            pointRadius: labels.length > 60 ? 0 : 4, pointBackgroundColor: '#fff'
         };
     });
 
@@ -236,7 +285,12 @@ const renderDashboard = async () => {
     chartInstance = new Chart(ctx, {
         type: 'line',
         data: { labels, datasets },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        options: { 
+            responsive: true, maintainAspectRatio: false, 
+            interaction: { intersect: false, mode: 'index' },
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+        }
     });
 };
 
@@ -247,9 +301,10 @@ function getWeekNumber(d) {
     return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
 }
 
-// --- TABS ---
+// --- 5. TAB LOGICA & ANIMATIE ---
 const switchTab = (newTab) => {
     if (currentTab === newTab) return;
+    
     const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
     const goingRight = tabsOrder.indexOf(newTab) > tabsOrder.indexOf(currentTab);
     const mainContent = document.getElementById('mainContent');
@@ -272,15 +327,20 @@ const switchTab = (newTab) => {
     if (newTab === 'Dashboard') {
         if (!document.getElementById('dashStart').value) handlePresetChange('14d');
         else renderDashboard();
-    } else renderCards();
+    } else {
+        renderCards();
+    }
     
     newContainer.classList.add(goingRight ? 'slide-in-from-right' : 'slide-in-from-left');
-    setTimeout(() => { clone.remove(); newContainer.classList.remove('slide-in-from-right', 'slide-in-from-left'); }, 350);
+    setTimeout(() => { 
+        clone.remove(); 
+        newContainer.classList.remove('slide-in-from-right', 'slide-in-from-left'); 
+    }, 350);
 };
 
 const getContainer = (tab) => tab === 'Dashboard' ? document.getElementById('dashboardContainer') : document.getElementById('cardContainer');
 
-// --- MODALS & REST ---
+// --- 6. MODALS & HELPERS ---
 const toLocalDatetime = (isoString) => {
     const date = new Date(isoString);
     const pad = (n) => n.toString().padStart(2, '0');
@@ -296,14 +356,19 @@ const renderEventHistory = async (cardId) => {
     }
     const events = await getAllFromStore('events');
     const cardEvents = events.filter(e => e.cardId === cardId).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
     let html = `<label style="display:block; font-size:0.8rem; font-weight:bold; margin-bottom:0.4rem; color:#777;">Klik Historie</label>`;
-    if (cardEvents.length === 0) html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data.</div>`;
-    else {
+    if (cardEvents.length === 0) {
+        html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data beschikbaar.</div>`;
+    } else {
         html += `<div class="event-history-list">`;
         cardEvents.forEach(ev => {
-            html += `<div class="event-row"><span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
-            <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
-            <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button></div>`;
+            html += `
+                <div class="event-row">
+                    <span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
+                    <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
+                    <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button>
+                </div>`;
         });
         html += `</div>`;
     }
@@ -320,45 +385,60 @@ window.openEditModal = async (id) => {
     selectedModalColor = card.color;
     document.getElementById('archiveCardBtn').textContent = card.archived ? 'Herstel naar Fav' : 'Archiveer';
     document.getElementById('editActionsArea').classList.remove('hidden');
-    updateColorSelection(); renderEventHistory(id);
+    updateColorSelection();
+    renderEventHistory(id);
     document.getElementById('newCardModal').classList.remove('hidden');
 };
 
 const setupModals = () => {
     const mainModal = document.getElementById('newCardModal');
     document.getElementById('openModalBtn').onclick = () => {
-        editingCardId = null; document.getElementById('cardTitleInput').value = '';
-        document.getElementById('cardStartInput').value = 0; document.getElementById('cardStepInput').value = 1;
+        editingCardId = null;
+        document.getElementById('cardTitleInput').value = '';
+        document.getElementById('cardStartInput').value = 0;
+        document.getElementById('cardStepInput').value = 1;
         document.getElementById('editActionsArea').classList.add('hidden');
         if (document.getElementById('eventHistoryContainer')) document.getElementById('eventHistoryContainer').innerHTML = '';
         mainModal.classList.remove('hidden');
     };
+
     document.getElementById('saveCardBtn').onclick = async () => {
         const name = document.getElementById('cardTitleInput').value.trim();
         if (!name) return;
         let card;
         if (editingCardId) {
-            const all = await getAllFromStore('cards'); card = all.find(c => c.id === editingCardId);
+            const all = await getAllFromStore('cards');
+            card = all.find(c => c.id === editingCardId);
             card.name = name; card.color = selectedModalColor;
             card.startValue = parseFloat(document.getElementById('cardStartInput').value);
             card.stepValue = parseFloat(document.getElementById('cardStepInput').value);
         } else {
             card = { id: crypto.randomUUID(), name, color: selectedModalColor, startValue: parseFloat(document.getElementById('cardStartInput').value), stepValue: parseFloat(document.getElementById('cardStepInput').value), archived: false, deleted: false, orderIndex: Date.now() };
         }
-        await saveCard(card); mainModal.classList.add('hidden'); renderCards();
-        if(currentTab === 'Dashboard') renderDashboard();
+        await saveCard(card);
+        mainModal.classList.add('hidden');
+        renderCards();
     };
+
     document.getElementById('archiveCardBtn').onclick = async () => {
-        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
-        card.archived = !card.archived; await saveCard(card);
-        mainModal.classList.add('hidden'); renderCards();
+        const all = await getAllFromStore('cards');
+        const card = all.find(c => c.id === editingCardId);
+        card.archived = !card.archived;
+        await saveCard(card);
+        mainModal.classList.add('hidden');
+        renderCards();
     };
+
     document.getElementById('deleteCardBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.remove('hidden');
     document.getElementById('confirmDeleteBtn').onclick = async () => {
-        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
+        const all = await getAllFromStore('cards');
+        const card = all.find(c => c.id === editingCardId);
         if (card) { card.deleted = true; await saveCard(card); }
-        document.getElementById('confirmDeleteModal').classList.add('hidden'); mainModal.classList.add('hidden'); renderCards();
+        document.getElementById('confirmDeleteModal').classList.add('hidden');
+        mainModal.classList.add('hidden');
+        renderCards();
     };
+
     document.getElementById('cancelModalBtn').onclick = () => mainModal.classList.add('hidden');
     document.getElementById('cancelDeleteBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.add('hidden');
 };
@@ -377,6 +457,7 @@ const updateColorSelection = () => {
     document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color === selectedModalColor));
 };
 
+// --- 7. START DE APP ---
 initDB().then(() => {
     setupModals();
     document.getElementById('archiveTab').onclick = () => switchTab('Archive');
@@ -385,34 +466,44 @@ initDB().then(() => {
     
     const picker = document.getElementById('colorPicker');
     presetColors.forEach(col => {
-        const s = document.createElement('div'); s.className = 'color-swatch'; s.style.backgroundColor = col; s.dataset.color = col;
-        s.onclick = () => { selectedModalColor = col; updateColorSelection(); }; picker.appendChild(s);
+        const s = document.createElement('div');
+        s.className = 'color-swatch'; s.style.backgroundColor = col; s.dataset.color = col;
+        s.onclick = () => { selectedModalColor = col; updateColorSelection(); };
+        picker.appendChild(s);
     });
-    
+
     const compactBtn = document.getElementById('compactBtn');
     compactBtn.onclick = () => {
-        isCompactMode = !isCompactMode; localStorage.setItem('compactMode', isCompactMode);
-        document.body.classList.toggle('compact-mode', isCompactMode); compactBtn.classList.toggle('active', isCompactMode);
+        isCompactMode = !isCompactMode;
+        localStorage.setItem('compactMode', isCompactMode);
+        document.body.classList.toggle('compact-mode', isCompactMode);
+        compactBtn.classList.toggle('active', isCompactMode);
     };
     if (isCompactMode) { document.body.classList.add('compact-mode'); compactBtn.classList.add('active'); }
-    
+
     const tfBtn = document.getElementById('timeframeBtn');
     const tfMenu = document.getElementById('timeframeMenu');
     tfBtn.textContent = `[${currentTimeframe}]`;
     tfBtn.onclick = (e) => { e.stopPropagation(); tfMenu.classList.toggle('hidden'); };
     document.querySelectorAll('.dropdown-item').forEach(item => {
         item.onclick = () => {
-            currentTimeframe = item.dataset.val; localStorage.setItem('timeframe', currentTimeframe);
-            tfBtn.textContent = `[${currentTimeframe}]`; tfMenu.classList.add('hidden'); renderCards();
+            currentTimeframe = item.dataset.val;
+            localStorage.setItem('timeframe', currentTimeframe);
+            tfBtn.textContent = `[${currentTimeframe}]`;
+            tfMenu.classList.add('hidden');
+            renderCards();
         };
     });
-    
+
     window.onclick = () => tfMenu.classList.add('hidden');
     document.getElementById('sortSelect').onchange = (e) => {
-        currentSort = e.target.value; localStorage.setItem('sortMethod', currentSort); renderCards();
+        currentSort = e.target.value;
+        localStorage.setItem('sortMethod', currentSort);
+        renderCards();
     };
     
     renderCards();
+
     new Sortable(document.getElementById('cardContainer'), {
         handle: '.drag-handle', animation: 150,
         onEnd: async () => {
