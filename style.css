@@ -3,6 +3,7 @@
     --bg-color: #f4f7f6;
     --text: #333;
     --danger: #dc3545;
+    --success: #28a745;
 }
 
 * { 
@@ -48,22 +49,11 @@ select, .primary-btn, .secondary-btn { flex-grow: 1; padding: 0.8rem; border-rad
 .tab-btn.active { color: var(--primary); border-bottom: 3px solid var(--primary); }
 
 /* --- ANIMATIE ENGINE --- */
-#mainContent { 
-    position: relative; 
-    width: 100%; 
-    min-height: 400px;
-}
-
-#cardContainer { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 1rem; 
-    width: 100%;
-}
+#mainContent { position: relative; width: 100%; min-height: 400px; }
+#cardContainer { display: flex; flex-direction: column; gap: 1rem; width: 100%; }
 
 .card-container-clone {
-    position: absolute;
-    top: 0; left: 0; width: 100%;
+    position: absolute; top: 0; left: 0; width: 100%;
     display: flex; flex-direction: column; gap: 1rem;
     pointer-events: none; z-index: 5;
 }
@@ -89,14 +79,7 @@ select, .primary-btn, .secondary-btn { flex-grow: 1; padding: 0.8rem; border-rad
 .card-title { font-size: 16px; font-weight: 700; display: block; }
 .card-count { font-size: 26px; font-weight: 800; line-height: 1.1; }
 
-/* Datum en Tijd */
-.card-datetime { 
-    font-size: 11px; 
-    font-weight: 700; 
-    color: #444; 
-    margin-top: 4px; 
-    display: block; 
-}
+.card-datetime { font-size: 11px; font-weight: 700; color: #444; margin-top: 4px; display: block; }
 .card-total { position: absolute; top: 10px; right: 14px; font-size: 9px; font-weight: 600; opacity: 0.6; }
 
 /* Compact mode */
@@ -105,10 +88,10 @@ body.compact-mode .counter-btn { width: 44px; height: 44px; font-size: 22px; }
 body.compact-mode .card-count { font-size: 20px; }
 body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 
-/* Modals */
+/* --- MODALS --- */
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 1rem; }
 .modal.hidden { display: none; }
-.modal-content { background: white; padding: 1.8rem; border-radius: 24px; width: 100%; max-width: 400px; }
+.modal-content { background: white; padding: 1.8rem; border-radius: 24px; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; }
 #cardTitleInput { width: 100%; padding: 1rem; border-radius: 12px; border: 1px solid #ddd; margin-bottom: 1.2rem; font-size: 1.1rem; }
 .modal-row { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
 .modal-col label { display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 0.4rem; color: #777; }
@@ -120,3 +103,17 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 .modal-actions-edit { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #eee; display: flex; gap: 0.8rem; }
 .danger-btn { background: var(--danger); color: white; border: none; padding: 0.8rem; border-radius: 10px; font-weight: bold; cursor: pointer; flex: 1; }
 .danger-btn-outline { background: none; color: var(--danger); border: 2px solid var(--danger); padding: 0.8rem; border-radius: 10px; font-weight: bold; cursor: pointer; flex: 1; }
+
+/* --- EVENT HISTORY --- */
+.event-history-list {
+    max-height: 140px; overflow-y: auto; background: #fafafa;
+    border: 1px solid #eee; border-radius: 8px; padding: 0.5rem; margin-bottom: 1.5rem;
+}
+.event-row { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #eaeaea; }
+.event-row:last-child { border-bottom: none; }
+.event-delta { font-weight: bold; width: 30px; font-size: 0.9rem;}
+.event-delta.pos { color: var(--success); }
+.event-delta.neg { color: var(--danger); }
+.event-time-input { padding: 0.3rem; border: 1px solid #ccc; border-radius: 6px; font-size: 0.8rem; color: #333; flex-grow: 1; margin: 0 0.5rem; }
+.event-delete-btn { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: #bbb; transition: 0.2s; padding: 0.2rem; }
+.event-delete-btn:hover { color: var(--danger); }
