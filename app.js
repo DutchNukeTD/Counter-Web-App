@@ -9,6 +9,7 @@ const presetColors = ['#FADCD9', '#F8E2CF', '#F5EECC', '#C9E4DE', '#C6DEF1', '#D
 let selectedModalColor = presetColors[0];
 let editingCardId = null;
 
+// --- DATABASE HELPER FUNCTIES ---
 const initDB = () => {
     return new Promise((resolve) => {
         const request = indexedDB.open(dbName, 1);
@@ -39,12 +40,45 @@ const saveCard = (card) => {
     });
 };
 
-window.addEv = async (id, delta) => {
-    const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
-    const store = db.transaction(['events'], 'readwrite').objectStore('events');
-    store.add(event).onsuccess = () => renderCards();
+const saveEventStore = (event) => {
+    return new Promise((resolve) => {
+        const store = db.transaction(['events'], 'readwrite').objectStore('events');
+        store.put(event).onsuccess = () => resolve();
+    });
 };
 
+const deleteEventFromDB = (id) => {
+    return new Promise((resolve) => {
+        const store = db.transaction(['events'], 'readwrite').objectStore('events');
+        store.delete(id).onsuccess = () => resolve();
+    });
+};
+
+// --- EVENTS TOEVOEGEN / AANPASSEN ---
+window.addEv = async (id, delta) => {
+    const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
+    await saveEventStore(event);
+    renderCards();
+};
+
+window.updateEventTimestamp = async (eventId, newLocalTime) => {
+    const events = await getAllFromStore('events');
+    const event = events.find(e => e.id === eventId);
+    if (event) {
+        // Zet de lokale input tijd weer netjes om naar de juiste opslag tijd
+        event.timestamp = new Date(newLocalTime).toISOString();
+        await saveEventStore(event);
+        renderCards(); // Update de kaartjes op de achtergrond
+    }
+};
+
+window.removeEvent = async (eventId) => {
+    await deleteEventFromDB(eventId);
+    renderEventHistory(editingCardId); // Ververs de lijst in de popup
+    renderCards(); // Update de kaartjes op de achtergrond
+};
+
+// --- RENDERING ---
 const renderCards = async (containerElement = document.getElementById('cardContainer')) => {
     const allCards = await getAllFromStore('cards');
     const events = await getAllFromStore('events');
@@ -75,11 +109,7 @@ const renderCards = async (containerElement = document.getElementById('cardConta
     containerElement.innerHTML = '';
     list.forEach(card => {
         const div = document.createElement('div');
-        div.className = 'card';
-        div.style.backgroundColor = card.color;
-        div.dataset.id = card.id;
-        
-        // Alleen de absolute datum/tijd gebruiken
+        div.className = 'card'; div.style.backgroundColor = card.color; div.dataset.id = card.id;
         const fDate = card.last ? new Date(card.last).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Geen clicks';
         
         div.innerHTML = `
@@ -99,13 +129,56 @@ const renderCards = async (containerElement = document.getElementById('cardConta
     });
 };
 
+// Zet een ISO datum om naar het juiste formaat voor de datum/tijd input in HTML
+const toLocalDatetime = (isoString) => {
+    const date = new Date(isoString);
+    const pad = (n) => n.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+// Genereert de klik-geschiedenis en bouwt deze in de modal op
+const renderEventHistory = async (cardId) => {
+    let container = document.getElementById('eventHistoryContainer');
+    // Maak de container aan als hij nog niet in de modal bestaat
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'eventHistoryContainer';
+        const editActions = document.getElementById('editActionsArea');
+        editActions.parentNode.insertBefore(container, editActions);
+    }
+
+    const events = await getAllFromStore('events');
+    const cardEvents = events.filter(e => e.cardId === cardId).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    let html = `<label style="display:block; font-size:0.8rem; font-weight:bold; margin-bottom:0.4rem; color:#777;">Klik Historie (Aanpassen/Verwijderen)</label>`;
+    
+    if (cardEvents.length === 0) {
+        html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Nog geen clicks geregistreerd.</div>`;
+    } else {
+        html += `<div class="event-history-list">`;
+        cardEvents.forEach(ev => {
+            const localTime = toLocalDatetime(ev.timestamp);
+            const deltaText = ev.delta > 0 ? `+${ev.delta}` : ev.delta;
+            html += `
+                <div class="event-row">
+                    <span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${deltaText}</span>
+                    <input type="datetime-local" class="event-time-input" value="${localTime}" onchange="updateEventTimestamp('${ev.id}', this.value)">
+                    <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')" title="Verwijder click">🗑️</button>
+                </div>
+            `;
+        });
+        html += `</div>`;
+    }
+    container.innerHTML = html;
+};
+
+// --- TABS & MODALS ---
 const switchTab = (newTab) => {
     if (currentTab === newTab) return;
     const mainContent = document.getElementById('mainContent');
     const oldContainer = document.getElementById('cardContainer');
     const clone = oldContainer.cloneNode(true);
-    clone.id = ''; 
-    clone.classList.add('card-container-clone');
+    clone.id = ''; clone.classList.add('card-container-clone');
     mainContent.appendChild(clone);
     const goingToArchive = (newTab === 'Archive');
     clone.classList.add(goingToArchive ? 'slide-out-to-right' : 'slide-out-to-left');
@@ -114,15 +187,7 @@ const switchTab = (newTab) => {
     document.getElementById('favoritesTab').classList.toggle('active', newTab === 'Favorites');
     renderCards(oldContainer);
     oldContainer.className = goingToArchive ? 'slide-in-from-left' : 'slide-in-from-right';
-    setTimeout(() => {
-        clone.remove();
-        oldContainer.className = ''; 
-    }, 350);
-};
-
-const setupTabs = () => {
-    document.getElementById('archiveTab').onclick = () => switchTab('Archive');
-    document.getElementById('favoritesTab').onclick = () => switchTab('Favorites');
+    setTimeout(() => { clone.remove(); oldContainer.className = ''; }, 350);
 };
 
 window.openEditModal = async (id) => {
@@ -136,6 +201,10 @@ window.openEditModal = async (id) => {
     document.getElementById('archiveCardBtn').textContent = card.archived ? 'Herstel naar Fav' : 'Archiveer';
     document.getElementById('editActionsArea').classList.remove('hidden');
     updateColorSelection();
+    
+    // Voeg de geschiedenis toe of werk hem bij
+    renderEventHistory(id);
+    
     document.getElementById('newCardModal').classList.remove('hidden');
 };
 
@@ -147,6 +216,11 @@ const setupModals = () => {
         document.getElementById('cardStartInput').value = 0;
         document.getElementById('cardStepInput').value = 1;
         document.getElementById('editActionsArea').classList.add('hidden');
+        
+        // Verberg de geschiedenis als we een "Nieuwe Kaart" maken
+        const historyContainer = document.getElementById('eventHistoryContainer');
+        if (historyContainer) historyContainer.innerHTML = '';
+
         mainModal.classList.remove('hidden');
     };
     document.getElementById('saveCardBtn').onclick = async () => {
@@ -203,7 +277,8 @@ const updateColorSelection = () => {
 
 initDB().then(() => {
     setupModals();
-    setupTabs();
+    document.getElementById('archiveTab').onclick = () => switchTab('Archive');
+    document.getElementById('favoritesTab').onclick = () => switchTab('Favorites');
     const picker = document.getElementById('colorPicker');
     presetColors.forEach(col => {
         const s = document.createElement('div');
