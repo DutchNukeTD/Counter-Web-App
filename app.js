@@ -1,6 +1,6 @@
 /**
  * Counter App - Volledig Script
- * Inclusief: CSV Export via #exportBtn, 24u Dashboard & Animaties
+ * Inclusief: Swipe-bediening, CSV Export, Dashboard-tijdlijn & Animaties
  */
 
 const dbName = 'CounterAppDB';
@@ -16,6 +16,10 @@ let editingCardId = null;
 
 let chartInstance = null;
 let selectedDashboardCards = [];
+
+// Swipe variabelen
+let touchstartX = 0;
+let touchendX = 0;
 
 // --- 1. DATABASE ---
 const initDB = () => {
@@ -62,7 +66,7 @@ const deleteEventFromDB = (id) => {
     });
 };
 
-// --- 2. CSV EXPORT (Gekoppeld aan exportBtn) ---
+// --- 2. CSV EXPORT ---
 const exportToCSV = async () => {
     const cards = await getAllFromStore('cards');
     const events = await getAllFromStore('events');
@@ -94,7 +98,7 @@ const exportToCSV = async () => {
     document.body.removeChild(link);
 };
 
-// --- 3. CLICK EVENTS & LOGICA ---
+// --- 3. CLICK EVENTS ---
 window.addEv = async (id, delta) => {
     const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
     await saveEventStore(event);
@@ -173,7 +177,7 @@ const renderCards = async () => {
     });
 };
 
-// --- 5. DASHBOARD LOGICA (24u weergave) ---
+// --- 5. DASHBOARD ---
 const parseInputDate = (dateStr) => {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
@@ -182,28 +186,18 @@ const parseInputDate = (dateStr) => {
 window.handlePresetChange = (val) => {
     const customDiv = document.getElementById('customDateRange');
     const now = new Date();
-    let start = new Date();
-    let end = new Date();
-
+    let start = new Date(); let end = new Date();
     customDiv.classList.add('hidden');
 
     if (val === 'today') {
         start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    } else if (val === '14d') {
-        start.setDate(now.getDate() - 14);
-    } else if (val === 'month') {
-        start = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else if (val === '3m') {
-        start.setMonth(now.getMonth() - 3);
-    } else if (val === '6m') {
-        start.setMonth(now.getMonth() - 6);
-    } else if (val === '1y') {
-        start.setFullYear(now.getFullYear() - 1);
-    } else if (val === 'custom') {
-        customDiv.classList.remove('hidden');
-        return; 
-    }
+    } else if (val === '14d') start.setDate(now.getDate() - 14);
+    else if (val === 'month') start = new Date(now.getFullYear(), now.getMonth(), 1);
+    else if (val === '3m') start.setMonth(now.getMonth() - 3);
+    else if (val === '6m') start.setMonth(now.getMonth() - 6);
+    else if (val === '1y') start.setFullYear(now.getFullYear() - 1);
+    else if (val === 'custom') { customDiv.classList.remove('hidden'); return; }
 
     const toStr = (d) => `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
     document.getElementById('dashStart').value = toStr(start);
@@ -215,13 +209,11 @@ const renderDashboard = async () => {
     const allCards = await getAllFromStore('cards');
     const events = await getAllFromStore('events');
     const activeCards = allCards.filter(c => !c.deleted);
-
     const startStr = document.getElementById('dashStart').value;
     const endStr = document.getElementById('dashEnd').value;
     const startDate = parseInputDate(startStr);
     const endDate = parseInputDate(endStr);
     endDate.setHours(23, 59, 59, 999);
-
     const isSingleDay = startStr === endStr;
 
     if (selectedDashboardCards.length === 0 && activeCards.length > 0) {
@@ -234,8 +226,7 @@ const renderDashboard = async () => {
         const chip = document.createElement('div');
         const isActive = selectedDashboardCards.includes(card.id);
         chip.className = `filter-chip ${isActive ? 'active' : ''}`;
-        chip.style.backgroundColor = card.color;
-        chip.textContent = card.name;
+        chip.style.backgroundColor = card.color; chip.textContent = card.name;
         chip.onclick = () => {
             isActive ? selectedDashboardCards = selectedDashboardCards.filter(id => id !== card.id) : selectedDashboardCards.push(card.id);
             renderDashboard();
@@ -243,8 +234,7 @@ const renderDashboard = async () => {
         filtersDiv.appendChild(chip);
     });
 
-    const labels = [];
-    const dataByCard = {};
+    const labels = []; const dataByCard = {};
     selectedDashboardCards.forEach(id => dataByCard[id] = []);
 
     if (isSingleDay) {
@@ -259,27 +249,12 @@ const renderDashboard = async () => {
             });
         }
     } else {
-        const diffDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-        if (diffDays <= 31) {
-            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-                labels.push(d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }));
-                selectedDashboardCards.forEach(id => {
-                    const dayTotal = events.filter(e => e.cardId === id && new Date(e.timestamp).toDateString() === d.toDateString()).reduce((sum, e) => sum + e.delta, 0);
-                    dataByCard[id].push(dayTotal);
-                });
-            }
-        } else {
-            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 7)) {
-                labels.push("W" + getWeekNumber(d));
-                selectedDashboardCards.forEach(id => {
-                    const nextW = new Date(d); nextW.setDate(d.getDate() + 7);
-                    const weekTotal = events.filter(e => {
-                        const et = new Date(e.timestamp);
-                        return e.cardId === id && et >= d && et < nextW;
-                    }).reduce((sum, e) => sum + e.delta, 0);
-                    dataByCard[id].push(weekTotal);
-                });
-            }
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            labels.push(d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }));
+            selectedDashboardCards.forEach(id => {
+                const dayTotal = events.filter(e => e.cardId === id && new Date(e.timestamp).toDateString() === d.toDateString()).reduce((sum, e) => sum + e.delta, 0);
+                dataByCard[id].push(dayTotal);
+            });
         }
     }
 
@@ -294,8 +269,7 @@ const renderDashboard = async () => {
     const ctx = document.getElementById('myChart').getContext('2d');
     if (chartInstance) chartInstance.destroy();
     chartInstance = new Chart(ctx, {
-        type: 'line',
-        data: { labels, datasets },
+        type: 'line', data: { labels, datasets },
         options: { responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' }, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 };
@@ -307,7 +281,7 @@ function getWeekNumber(d) {
     return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
 }
 
-// --- 6. TAB LOGICA ---
+// --- 6. TAB LOGICA & SWIPE ---
 const switchTab = (newTab) => {
     if (currentTab === newTab) return;
     const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
@@ -338,9 +312,24 @@ const switchTab = (newTab) => {
     setTimeout(() => { clone.remove(); newContainer.classList.remove('slide-in-from-right', 'slide-in-from-left'); }, 350);
 };
 
+const handleGesture = () => {
+    const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
+    const currentIndex = tabsOrder.indexOf(currentTab);
+    const threshold = 50; // Hoeveel pixels moet je vegen?
+
+    if (touchendX < touchstartX - threshold) {
+        // Swipe naar links -> Volgende tab
+        if (currentIndex < tabsOrder.length - 1) switchTab(tabsOrder[currentIndex + 1]);
+    }
+    if (touchendX > touchstartX + threshold) {
+        // Swipe naar rechts -> Vorige tab
+        if (currentIndex > 0) switchTab(tabsOrder[currentIndex - 1]);
+    }
+};
+
 const getContainer = (tab) => tab === 'Dashboard' ? document.getElementById('dashboardContainer') : document.getElementById('cardContainer');
 
-// --- 7. MODALS ---
+// --- 7. MODALS & HELPERS ---
 const toLocalDatetime = (isoString) => {
     const date = new Date(isoString);
     const pad = (n) => n.toString().padStart(2, '0');
@@ -435,11 +424,14 @@ const updateColorSelection = () => {
     document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color === selectedModalColor));
 };
 
-// --- 8. START DE APP ---
+// --- 8. START APP ---
 initDB().then(() => {
     setupModals();
     
-    // KOPPELING EXPORT KNOP
+    // Swipe Listeners
+    document.addEventListener('touchstart', e => { touchstartX = e.changedTouches[0].screenX; }, false);
+    document.addEventListener('touchend', e => { touchendX = e.changedTouches[0].screenX; handleGesture(); }, false);
+
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) exportBtn.onclick = exportToCSV;
 
