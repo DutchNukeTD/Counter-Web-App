@@ -1,6 +1,6 @@
 /**
  * Counter App - Volledig Script
- * Inclusief: Verbeterde Dashboard-tijdlijn, IndexedDB, Animaties en Sortering
+ * Inclusief: CSV Export via #exportBtn, 24u Dashboard & Animaties
  */
 
 const dbName = 'CounterAppDB';
@@ -8,17 +8,16 @@ let db;
 let currentSort = localStorage.getItem('sortMethod') || 'manual';
 let isCompactMode = localStorage.getItem('compactMode') === 'true';
 let currentTimeframe = localStorage.getItem('timeframe') || 'V';
-let currentTab = 'Favorites'; // Opties: 'Archive', 'Favorites', 'Dashboard'
+let currentTab = 'Favorites'; 
 
 const presetColors = ['#FADCD9', '#F8E2CF', '#F5EECC', '#C9E4DE', '#C6DEF1', '#DBCDF0', '#F2C6DE', '#F7D9C4', '#E2E2E2', '#C1E1C1', '#F0E6EF', '#E2D1F9'];
 let selectedModalColor = presetColors[0];
 let editingCardId = null;
 
-// Dashboard State
 let chartInstance = null;
 let selectedDashboardCards = [];
 
-// --- 1. DATABASE INITIALISATIE ---
+// --- 1. DATABASE ---
 const initDB = () => {
     return new Promise((resolve) => {
         const request = indexedDB.open(dbName, 1);
@@ -63,14 +62,41 @@ const deleteEventFromDB = (id) => {
     });
 };
 
-// --- 2. CLICK EVENTS & HISTORIE ---
+// --- 2. CSV EXPORT (Gekoppeld aan exportBtn) ---
+const exportToCSV = async () => {
+    const cards = await getAllFromStore('cards');
+    const events = await getAllFromStore('events');
+    
+    if (events.length === 0) {
+        alert("Geen gegevens om te exporteren.");
+        return;
+    }
+
+    let csv = 'Datum;Tijd;Kaart;Delta\n';
+    events.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    events.forEach(ev => {
+        const card = cards.find(c => c.id === ev.cardId);
+        const cardName = card ? card.name : 'Verwijderde Kaart';
+        const dateObj = new Date(ev.timestamp);
+        const date = dateObj.toLocaleDateString('nl-NL');
+        const time = dateObj.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+        csv += `${date};${time};${cardName};${ev.delta}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `counter_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
+// --- 3. CLICK EVENTS & LOGICA ---
 window.addEv = async (id, delta) => {
-    const event = { 
-        id: crypto.randomUUID(), 
-        cardId: id, 
-        timestamp: new Date().toISOString(), 
-        delta: delta 
-    };
+    const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
     await saveEventStore(event);
     renderCards();
     if(currentTab === 'Dashboard') renderDashboard();
@@ -94,7 +120,7 @@ window.removeEvent = async (eventId) => {
     if(currentTab === 'Dashboard') renderDashboard();
 };
 
-// --- 3. RENDERING KAARTEN (LIJST WEERGAVE) ---
+// --- 4. RENDERING KAARTEN ---
 const renderCards = async () => {
     const containerElement = document.getElementById('cardContainer');
     const allCards = await getAllFromStore('cards');
@@ -116,10 +142,8 @@ const renderCards = async () => {
     });
 
     const list = cards.map(c => ({
-        ...c, 
-        display: (c.startValue || 0) + stats[c.id].val,
-        total: (c.startValue || 0) + stats[c.id].total, 
-        last: stats[c.id].last
+        ...c, display: (c.startValue || 0) + stats[c.id].val,
+        total: (c.startValue || 0) + stats[c.id].total, last: stats[c.id].last
     }));
 
     if (currentSort === 'alphabetical') list.sort((a,b) => a.name.localeCompare(b.name));
@@ -149,9 +173,7 @@ const renderCards = async () => {
     });
 };
 
-// --- 4. DASHBOARD LOGICA (MET FIX VOOR 'VANDAAG') ---
-
-// Helper om datum-input correct (lokaal) om te zetten
+// --- 5. DASHBOARD LOGICA (24u weergave) ---
 const parseInputDate = (dateStr) => {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
@@ -196,7 +218,6 @@ const renderDashboard = async () => {
 
     const startStr = document.getElementById('dashStart').value;
     const endStr = document.getElementById('dashEnd').value;
-    
     const startDate = parseInputDate(startStr);
     const endDate = parseInputDate(endStr);
     endDate.setHours(23, 59, 59, 999);
@@ -207,7 +228,6 @@ const renderDashboard = async () => {
         selectedDashboardCards = activeCards.slice(0, 5).map(c => c.id);
     }
 
-    // Filter Chips
     const filtersDiv = document.getElementById('dashboardFilters');
     filtersDiv.innerHTML = '';
     activeCards.forEach(card => {
@@ -228,30 +248,23 @@ const renderDashboard = async () => {
     selectedDashboardCards.forEach(id => dataByCard[id] = []);
 
     if (isSingleDay) {
-        // UURSWEERGAVE
         for (let h = 0; h < 24; h++) {
             labels.push(`${h.toString().padStart(2, '0')}:00`);
             selectedDashboardCards.forEach(id => {
                 const hourTotal = events.filter(e => {
                     const et = new Date(e.timestamp);
-                    return e.cardId === id && 
-                           et.getFullYear() === startDate.getFullYear() &&
-                           et.getMonth() === startDate.getMonth() &&
-                           et.getDate() === startDate.getDate() &&
-                           et.getHours() === h;
+                    return e.cardId === id && et.getFullYear() === startDate.getFullYear() && et.getMonth() === startDate.getMonth() && et.getDate() === startDate.getDate() && et.getHours() === h;
                 }).reduce((sum, e) => sum + e.delta, 0);
                 dataByCard[id].push(hourTotal);
             });
         }
     } else {
-        // DAGWEERGAVE OF WEEKWEERGAVE
         const diffDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
         if (diffDays <= 31) {
             for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
                 labels.push(d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }));
                 selectedDashboardCards.forEach(id => {
-                    const dayTotal = events.filter(e => e.cardId === id && new Date(e.timestamp).toDateString() === d.toDateString())
-                                           .reduce((sum, e) => sum + e.delta, 0);
+                    const dayTotal = events.filter(e => e.cardId === id && new Date(e.timestamp).toDateString() === d.toDateString()).reduce((sum, e) => sum + e.delta, 0);
                     dataByCard[id].push(dayTotal);
                 });
             }
@@ -273,10 +286,8 @@ const renderDashboard = async () => {
     const datasets = selectedDashboardCards.map(id => {
         const card = activeCards.find(c => c.id === id);
         return {
-            label: card.name, data: dataByCard[id], 
-            borderColor: (card.color === '#E2E2E2' || card.color === '#F5EECC') ? '#999' : card.color,
-            backgroundColor: card.color, tension: 0.4, borderWidth: 3, 
-            pointRadius: labels.length > 60 ? 0 : 4, pointBackgroundColor: '#fff'
+            label: card.name, data: dataByCard[id], borderColor: (card.color === '#E2E2E2' || card.color === '#F5EECC') ? '#999' : card.color,
+            backgroundColor: card.color, tension: 0.4, borderWidth: 3, pointRadius: labels.length > 60 ? 0 : 4, pointBackgroundColor: '#fff'
         };
     });
 
@@ -285,12 +296,7 @@ const renderDashboard = async () => {
     chartInstance = new Chart(ctx, {
         type: 'line',
         data: { labels, datasets },
-        options: { 
-            responsive: true, maintainAspectRatio: false, 
-            interaction: { intersect: false, mode: 'index' },
-            plugins: { legend: { display: false } },
-            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
-        }
+        options: { responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' }, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
     });
 };
 
@@ -301,10 +307,9 @@ function getWeekNumber(d) {
     return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
 }
 
-// --- 5. TAB LOGICA & ANIMATIE ---
+// --- 6. TAB LOGICA ---
 const switchTab = (newTab) => {
     if (currentTab === newTab) return;
-    
     const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
     const goingRight = tabsOrder.indexOf(newTab) > tabsOrder.indexOf(currentTab);
     const mainContent = document.getElementById('mainContent');
@@ -327,20 +332,15 @@ const switchTab = (newTab) => {
     if (newTab === 'Dashboard') {
         if (!document.getElementById('dashStart').value) handlePresetChange('14d');
         else renderDashboard();
-    } else {
-        renderCards();
-    }
+    } else renderCards();
     
     newContainer.classList.add(goingRight ? 'slide-in-from-right' : 'slide-in-from-left');
-    setTimeout(() => { 
-        clone.remove(); 
-        newContainer.classList.remove('slide-in-from-right', 'slide-in-from-left'); 
-    }, 350);
+    setTimeout(() => { clone.remove(); newContainer.classList.remove('slide-in-from-right', 'slide-in-from-left'); }, 350);
 };
 
 const getContainer = (tab) => tab === 'Dashboard' ? document.getElementById('dashboardContainer') : document.getElementById('cardContainer');
 
-// --- 6. MODALS & HELPERS ---
+// --- 7. MODALS ---
 const toLocalDatetime = (isoString) => {
     const date = new Date(isoString);
     const pad = (n) => n.toString().padStart(2, '0');
@@ -356,19 +356,14 @@ const renderEventHistory = async (cardId) => {
     }
     const events = await getAllFromStore('events');
     const cardEvents = events.filter(e => e.cardId === cardId).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    
     let html = `<label style="display:block; font-size:0.8rem; font-weight:bold; margin-bottom:0.4rem; color:#777;">Klik Historie</label>`;
-    if (cardEvents.length === 0) {
-        html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data beschikbaar.</div>`;
-    } else {
+    if (cardEvents.length === 0) html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data.</div>`;
+    else {
         html += `<div class="event-history-list">`;
         cardEvents.forEach(ev => {
-            html += `
-                <div class="event-row">
-                    <span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
-                    <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
-                    <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button>
-                </div>`;
+            html += `<div class="event-row"><span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
+            <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
+            <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button></div>`;
         });
         html += `</div>`;
     }
@@ -385,60 +380,43 @@ window.openEditModal = async (id) => {
     selectedModalColor = card.color;
     document.getElementById('archiveCardBtn').textContent = card.archived ? 'Herstel naar Fav' : 'Archiveer';
     document.getElementById('editActionsArea').classList.remove('hidden');
-    updateColorSelection();
-    renderEventHistory(id);
+    updateColorSelection(); renderEventHistory(id);
     document.getElementById('newCardModal').classList.remove('hidden');
 };
 
 const setupModals = () => {
     const mainModal = document.getElementById('newCardModal');
     document.getElementById('openModalBtn').onclick = () => {
-        editingCardId = null;
-        document.getElementById('cardTitleInput').value = '';
-        document.getElementById('cardStartInput').value = 0;
-        document.getElementById('cardStepInput').value = 1;
+        editingCardId = null; document.getElementById('cardTitleInput').value = '';
+        document.getElementById('cardStartInput').value = 0; document.getElementById('cardStepInput').value = 1;
         document.getElementById('editActionsArea').classList.add('hidden');
         if (document.getElementById('eventHistoryContainer')) document.getElementById('eventHistoryContainer').innerHTML = '';
         mainModal.classList.remove('hidden');
     };
-
     document.getElementById('saveCardBtn').onclick = async () => {
         const name = document.getElementById('cardTitleInput').value.trim();
         if (!name) return;
         let card;
         if (editingCardId) {
-            const all = await getAllFromStore('cards');
-            card = all.find(c => c.id === editingCardId);
+            const all = await getAllFromStore('cards'); card = all.find(c => c.id === editingCardId);
             card.name = name; card.color = selectedModalColor;
             card.startValue = parseFloat(document.getElementById('cardStartInput').value);
             card.stepValue = parseFloat(document.getElementById('cardStepInput').value);
         } else {
             card = { id: crypto.randomUUID(), name, color: selectedModalColor, startValue: parseFloat(document.getElementById('cardStartInput').value), stepValue: parseFloat(document.getElementById('cardStepInput').value), archived: false, deleted: false, orderIndex: Date.now() };
         }
-        await saveCard(card);
-        mainModal.classList.add('hidden');
-        renderCards();
+        await saveCard(card); mainModal.classList.add('hidden'); renderCards();
     };
-
     document.getElementById('archiveCardBtn').onclick = async () => {
-        const all = await getAllFromStore('cards');
-        const card = all.find(c => c.id === editingCardId);
-        card.archived = !card.archived;
-        await saveCard(card);
-        mainModal.classList.add('hidden');
-        renderCards();
+        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
+        card.archived = !card.archived; await saveCard(card); mainModal.classList.add('hidden'); renderCards();
     };
-
     document.getElementById('deleteCardBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.remove('hidden');
     document.getElementById('confirmDeleteBtn').onclick = async () => {
-        const all = await getAllFromStore('cards');
-        const card = all.find(c => c.id === editingCardId);
+        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
         if (card) { card.deleted = true; await saveCard(card); }
-        document.getElementById('confirmDeleteModal').classList.add('hidden');
-        mainModal.classList.add('hidden');
-        renderCards();
+        document.getElementById('confirmDeleteModal').classList.add('hidden'); mainModal.classList.add('hidden'); renderCards();
     };
-
     document.getElementById('cancelModalBtn').onclick = () => mainModal.classList.add('hidden');
     document.getElementById('cancelDeleteBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.add('hidden');
 };
@@ -457,53 +435,43 @@ const updateColorSelection = () => {
     document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color === selectedModalColor));
 };
 
-// --- 7. START DE APP ---
+// --- 8. START DE APP ---
 initDB().then(() => {
     setupModals();
+    
+    // KOPPELING EXPORT KNOP
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) exportBtn.onclick = exportToCSV;
+
     document.getElementById('archiveTab').onclick = () => switchTab('Archive');
     document.getElementById('favoritesTab').onclick = () => switchTab('Favorites');
     document.getElementById('dashboardTab').onclick = () => switchTab('Dashboard');
-    
     const picker = document.getElementById('colorPicker');
     presetColors.forEach(col => {
-        const s = document.createElement('div');
-        s.className = 'color-swatch'; s.style.backgroundColor = col; s.dataset.color = col;
-        s.onclick = () => { selectedModalColor = col; updateColorSelection(); };
-        picker.appendChild(s);
+        const s = document.createElement('div'); s.className = 'color-swatch'; s.style.backgroundColor = col; s.dataset.color = col;
+        s.onclick = () => { selectedModalColor = col; updateColorSelection(); }; picker.appendChild(s);
     });
-
     const compactBtn = document.getElementById('compactBtn');
     compactBtn.onclick = () => {
-        isCompactMode = !isCompactMode;
-        localStorage.setItem('compactMode', isCompactMode);
-        document.body.classList.toggle('compact-mode', isCompactMode);
-        compactBtn.classList.toggle('active', isCompactMode);
+        isCompactMode = !isCompactMode; localStorage.setItem('compactMode', isCompactMode);
+        document.body.classList.toggle('compact-mode', isCompactMode); compactBtn.classList.toggle('active', isCompactMode);
     };
     if (isCompactMode) { document.body.classList.add('compact-mode'); compactBtn.classList.add('active'); }
-
     const tfBtn = document.getElementById('timeframeBtn');
     const tfMenu = document.getElementById('timeframeMenu');
     tfBtn.textContent = `[${currentTimeframe}]`;
     tfBtn.onclick = (e) => { e.stopPropagation(); tfMenu.classList.toggle('hidden'); };
     document.querySelectorAll('.dropdown-item').forEach(item => {
         item.onclick = () => {
-            currentTimeframe = item.dataset.val;
-            localStorage.setItem('timeframe', currentTimeframe);
-            tfBtn.textContent = `[${currentTimeframe}]`;
-            tfMenu.classList.add('hidden');
-            renderCards();
+            currentTimeframe = item.dataset.val; localStorage.setItem('timeframe', currentTimeframe);
+            tfBtn.textContent = `[${currentTimeframe}]`; tfMenu.classList.add('hidden'); renderCards();
         };
     });
-
     window.onclick = () => tfMenu.classList.add('hidden');
     document.getElementById('sortSelect').onchange = (e) => {
-        currentSort = e.target.value;
-        localStorage.setItem('sortMethod', currentSort);
-        renderCards();
+        currentSort = e.target.value; localStorage.setItem('sortMethod', currentSort); renderCards();
     };
-    
     renderCards();
-
     new Sortable(document.getElementById('cardContainer'), {
         handle: '.drag-handle', animation: 150,
         onEnd: async () => {
