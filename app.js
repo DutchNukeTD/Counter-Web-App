@@ -7,7 +7,8 @@ let db;
 let currentSort = localStorage.getItem('sortMethod') || 'manual';
 let isCompactMode = localStorage.getItem('compactMode') === 'true';
 let currentTimeframe = localStorage.getItem('timeframe') || 'V';
-let currentTab = 'Favorites'; 
+let currentTab = 'Favorites';
+let searchQuery = '';
 
 const presetColors = ['#FADCD9', '#F8E2CF', '#F5EECC', '#C9E4DE', '#C6DEF1', '#DBCDF0', '#F2C6DE', '#F7D9C4', '#E2E2E2', '#C1E1C1', '#F0E6EF', '#E2D1F9'];
 let selectedModalColor = presetColors[0];
@@ -148,7 +149,11 @@ window.addEv = async (id, delta) => {
     }
     const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
     await saveEventStore(event);
-    renderCards();
+    if (searchQuery.trim()) {
+        renderSearchResults(searchQuery);
+    } else {
+        renderCards();
+    }
     if(currentTab === 'Dashboard') renderDashboard();
 };
 
@@ -276,7 +281,76 @@ const renderCards = async () => {
     });
 };
 
-// --- 6. DASHBOARD ---
+// --- 5b. ZOEKRESULTATEN ---
+const renderSearchResults = async (query) => {
+    const containerElement = document.getElementById('searchResultsContainer');
+    const allCards = await getAllFromStore('cards');
+    const events = await getAllFromStore('events');
+
+    const q = query.toLowerCase().trim();
+    // Zoek in zowel Favorieten als Archief (niet verwijderd)
+    const matched = allCards.filter(c => !c.deleted && c.name.toLowerCase().includes(q));
+
+    const periods = getPeriods();
+    const stats = {};
+    matched.forEach(c => stats[c.id] = { val: 0, total: 0, last: null });
+    events.forEach(ev => {
+        if (!stats[ev.cardId]) return;
+        const time = new Date(ev.timestamp).getTime();
+        stats[ev.cardId].total += ev.delta;
+        if (time >= periods[currentTimeframe.toLowerCase()]) stats[ev.cardId].val += ev.delta;
+        if (!stats[ev.cardId].last || time > new Date(stats[ev.cardId].last).getTime()) stats[ev.cardId].last = ev.timestamp;
+    });
+
+    const list = matched.map(c => ({
+        ...c,
+        display: (c.startValue || 0) + stats[c.id].val,
+        total: (c.startValue || 0) + stats[c.id].total,
+        last: stats[c.id].last
+    })).sort((a, b) => a.name.localeCompare(b.name));
+
+    containerElement.innerHTML = '';
+
+    if (list.length === 0) {
+        containerElement.innerHTML = `<div style="text-align:center; color:#aaa; padding:2rem; font-weight:600;">Geen kaarten gevonden voor "${query}"</div>`;
+        return;
+    }
+
+    list.forEach(card => {
+        const div = document.createElement('div');
+        div.className = 'card'; div.style.backgroundColor = card.color; div.dataset.id = card.id;
+        const fDate = card.last ? new Date(card.last).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Geen clicks';
+        const sourceBadge = card.archived ? 'Archief' : 'Favoriet';
+
+        let extraBtnHTML = '';
+        if (card.name.toLowerCase() === 'eten') {
+            extraBtnHTML = `<button class="meal-log-btn" onclick="openMealModal('${card.id}')">🍴 Maaltijd Loggen</button>`;
+        }
+        if (card.name.toLowerCase() === 'poep') {
+            extraBtnHTML = `<button class="meal-log-btn" onclick="openPoepModal('${card.id}')">💩 Poep Loggen</button>`;
+            const lastPoepEvent = events.filter(e => e.cardId === card.id && e.note).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+            if (lastPoepEvent) extraBtnHTML += `<span class="poep-card-info">${lastPoepEvent.note}</span>`;
+        }
+
+        div.innerHTML = `
+            <span class="search-source-badge">${sourceBadge}</span>
+            <button class="counter-btn" onclick="addEv('${card.id}', -${card.stepValue || 1})">-</button>
+            <div class="card-center">
+                <div onclick="openEditModal('${card.id}')" style="cursor:pointer">
+                    <span class="card-title">${card.name} ✏️</span>
+                </div>
+                <div class="card-count">${card.display}</div>
+                <span class="card-datetime">${fDate}</span>
+                ${extraBtnHTML}
+            </div>
+            <button class="counter-btn" onclick="addEv('${card.id}', ${card.stepValue || 1})">+</button>
+            <div class="card-total">Totaal: ${card.total}</div>
+        `;
+        containerElement.appendChild(div);
+    });
+};
+
+
 const parseInputDate = (dateStr) => {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
@@ -375,6 +449,16 @@ const renderDashboard = async () => {
 
 const switchTab = (newTab) => {
     if (currentTab === newTab) return;
+    // Zoekbalk leegmaken bij tab-wissel
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput && searchInput.value) {
+        searchInput.value = '';
+        searchQuery = '';
+        document.getElementById('searchClearBtn').classList.add('hidden');
+        document.getElementById('searchResultsContainer').classList.add('hidden-tab');
+        document.querySelector('.tabs-container').style.opacity = '';
+        document.querySelector('.tabs-container').style.pointerEvents = '';
+    }
     const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
     const goingRight = tabsOrder.indexOf(newTab) > tabsOrder.indexOf(currentTab);
     const mainContent = document.getElementById('mainContent');
@@ -469,6 +553,41 @@ initDB().then(() => {
     
     // Laad CSV op de achtergrond
     loadMealsFromCSV();
+
+    // Zoekfunctie
+    const searchInput = document.getElementById('searchInput');
+    const searchClearBtn = document.getElementById('searchClearBtn');
+    const searchResultsContainer = document.getElementById('searchResultsContainer');
+
+    const activateSearch = (q) => {
+        searchQuery = q;
+        const hasQuery = q.trim().length > 0;
+        searchClearBtn.classList.toggle('hidden', !hasQuery);
+
+        if (hasQuery) {
+            // Verberg tabs + actieve tab inhoud, toon zoekresultaten
+            document.querySelector('.tabs-container').style.opacity = '0.4';
+            document.querySelector('.tabs-container').style.pointerEvents = 'none';
+            document.getElementById('cardContainer').classList.add('hidden-tab');
+            document.getElementById('dashboardContainer').classList.add('hidden-tab');
+            searchResultsContainer.classList.remove('hidden-tab');
+            renderSearchResults(q);
+        } else {
+            // Herstel normale weergave
+            document.querySelector('.tabs-container').style.opacity = '';
+            document.querySelector('.tabs-container').style.pointerEvents = '';
+            searchResultsContainer.classList.add('hidden-tab');
+            if (currentTab !== 'Dashboard') document.getElementById('cardContainer').classList.remove('hidden-tab');
+            else document.getElementById('dashboardContainer').classList.remove('hidden-tab');
+        }
+    };
+
+    searchInput.addEventListener('input', (e) => activateSearch(e.target.value));
+    searchClearBtn.onclick = () => {
+        searchInput.value = '';
+        searchInput.focus();
+        activateSearch('');
+    };
 
     // Event Listeners (Knoppen)
     document.getElementById('exportBtn').onclick = exportToCSV;
