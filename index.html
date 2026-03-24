@@ -94,6 +94,44 @@
                 <button id="deleteCardBtn" class="danger-btn-outline">Verwijderen</button>
                 <button id="archiveCardBtn" class="secondary-btn">Archiveer</button>
             </div>
+            </div>
+    </div>
+
+    <div id="mealModal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Wat heb je gegeten?</h2>
+            <select id="mealSelect" style="width: 100%; padding: 10px; margin: 10px 0; border-radius: 8px; border: 1px solid #ccc;">
+                <option value="">-- Kies uit lijst --</option>
+            </select>
+            <input type="text" id="customMealInput" placeholder="Of typ zelf iets nieuws..." style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; margin-bottom: 20px;">
+            <div class="modal-actions">
+                <button id="cancelMealBtn" class="secondary-btn">Annuleren</button>
+                <button id="confirmMealBtn" class="primary-btn">Log Eten</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- POEP MODAL (Bristol Stoelgangschaal) -->
+    <div id="poepModal" class="modal hidden" style="z-index: 1050;">
+        <div class="modal-content">
+            <h2>🚽 Poep Loggen</h2>
+            <p class="color-label">Type (Bristol schaal):</p>
+            <div class="bristol-grid" id="bristolGrid"></div>
+            <div class="poep-extras">
+                <label class="poep-checkbox-label">
+                    <input type="checkbox" id="poepRemsporen"> Remsporen
+                </label>
+                <label class="poep-checkbox-label">
+                    <input type="checkbox" id="poepDrijven"> Drijven
+                </label>
+                <label class="poep-checkbox-label">
+                    <input type="checkbox" id="poepStinkt"> Stinkt extra
+                </label>
+            </div>
+            <div class="modal-actions" style="margin-top:1.2rem;">
+                <button id="cancelPoepBtn" class="secondary-btn">Annuleren</button>
+                <button id="confirmPoepBtn" class="primary-btn">Log Poep 💩</button>
+            </div>
         </div>
     </div>
 
@@ -109,7 +147,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
     <script src="app.js"></script>
 </body>
 </html>
