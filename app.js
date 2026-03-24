@@ -1,6 +1,5 @@
 /**
- * Counter App - Volledig Script
- * Inclusief: Swipe-bediening, CSV Export, Dashboard-tijdlijn & Animaties
+ * Counter App - Volledig en Werkend
  */
 
 const dbName = 'CounterAppDB';
@@ -17,9 +16,25 @@ let editingCardId = null;
 let chartInstance = null;
 let selectedDashboardCards = [];
 
-// Swipe variabelen
+// Nieuwe variabelen voor Maaltijden en Swipe
+let mealsList = [];
+let activeMealCardId = null;
 let touchstartX = 0;
 let touchendX = 0;
+
+// Poep / Bristol variabelen
+let activePoepCardId = null;
+let selectedBristolType = 4; // Standaard type 4
+
+const bristolTypes = [
+    { type: 1, emoji: '🪨', label: 'Harde\nkeutels',  color: '#8B4513' },
+    { type: 2, emoji: '🌰', label: 'Worst\nklonterig', color: '#A0522D' },
+    { type: 3, emoji: '🌭', label: 'Worst\ngebarsten', color: '#CD853F' },
+    { type: 4, emoji: '🐍', label: 'Slang\nglad',     color: '#8B6914' },
+    { type: 5, emoji: '🫘', label: 'Zachte\nstukjes',  color: '#D2691E' },
+    { type: 6, emoji: '💩', label: 'Pluizig\nzacht',   color: '#B8860B' },
+    { type: 7, emoji: '💧', label: 'Vloei-\nbaar',     color: '#DAA520' },
+];
 
 // --- 1. DATABASE ---
 const initDB = () => {
@@ -66,7 +81,28 @@ const deleteEventFromDB = (id) => {
     });
 };
 
-// --- 2. CSV EXPORT ---
+// --- 2. CSV MAALTIJDEN INLEZEN ---
+const loadMealsFromCSV = async () => {
+    try {
+        const response = await fetch('Maaltijden - Blad1.csv');
+        const text = await response.text();
+        const rows = text.split('\n').map(row => row.split(','));
+        // Pak de namen uit de eerste kolom (negeer de titel-rij)
+        const names = [...new Set(rows.slice(1).map(r => r[0]?.trim().replace(/^"|"$/g, '')))].filter(Boolean);
+        mealsList = names.sort();
+
+        const select = document.getElementById('mealSelect');
+        mealsList.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.warn("CSV bestand niet gevonden in map, of kan niet lokaal worden ingelezen zonder server.");
+    }
+};
+
+// --- 3. CSV EXPORT (Met Notitie Veld) ---
 const exportToCSV = async () => {
     const cards = await getAllFromStore('cards');
     const events = await getAllFromStore('events');
@@ -76,7 +112,7 @@ const exportToCSV = async () => {
         return;
     }
 
-    let csv = 'Datum;Tijd;Kaart;Delta\n';
+    let csv = 'Datum;Tijd;Kaart;Delta;Notitie\n';
     events.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     events.forEach(ev => {
@@ -85,7 +121,8 @@ const exportToCSV = async () => {
         const dateObj = new Date(ev.timestamp);
         const date = dateObj.toLocaleDateString('nl-NL');
         const time = dateObj.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-        csv += `${date};${time};${cardName};${ev.delta}\n`;
+        // ev.note wordt toegevoegd voor de maaltijden
+        csv += `${date};${time};${cardName};${ev.delta};${ev.note || ''}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -98,8 +135,17 @@ const exportToCSV = async () => {
     document.body.removeChild(link);
 };
 
-// --- 3. CLICK EVENTS ---
+// --- 4. CLICK EVENTS ---
 window.addEv = async (id, delta) => {
+    // Als het de poep-kaart is en delta positief, open de poep modal
+    if (delta > 0) {
+        const cards = await getAllFromStore('cards');
+        const card = cards.find(c => c.id === id);
+        if (card && card.name.toLowerCase() === 'poep') {
+            openPoepModal(id);
+            return;
+        }
+    }
     const event = { id: crypto.randomUUID(), cardId: id, timestamp: new Date().toISOString(), delta: delta };
     await saveEventStore(event);
     renderCards();
@@ -124,7 +170,43 @@ window.removeEvent = async (eventId) => {
     if(currentTab === 'Dashboard') renderDashboard();
 };
 
-// --- 4. RENDERING KAARTEN ---
+window.openMealModal = (id) => {
+    activeMealCardId = id;
+    document.getElementById('mealModal').classList.remove('hidden');
+    document.getElementById('customMealInput').value = '';
+    document.getElementById('mealSelect').value = '';
+};
+
+window.openPoepModal = (id) => {
+    activePoepCardId = id;
+    selectedBristolType = 4;
+    // Checkboxes resetten
+    document.getElementById('poepRemsporen').checked = false;
+    document.getElementById('poepDrijven').checked = false;
+    document.getElementById('poepStinkt').checked = false;
+    // Bristol knoppen renderen
+    const grid = document.getElementById('bristolGrid');
+    grid.innerHTML = '';
+    bristolTypes.forEach(b => {
+        const btn = document.createElement('button');
+        btn.className = 'bristol-btn' + (b.type === 4 ? ' selected' : '');
+        btn.style.backgroundColor = b.type === 4 ? b.color + '33' : '#f5f5f5';
+        btn.innerHTML = `<span class="b-num">${b.emoji}</span><span class="b-num" style="color:${b.color}">${b.type}</span><span class="b-label">${b.label}</span>`;
+        btn.onclick = () => {
+            selectedBristolType = b.type;
+            document.querySelectorAll('.bristol-btn').forEach(el => {
+                el.classList.remove('selected');
+                el.style.backgroundColor = '#f5f5f5';
+            });
+            btn.classList.add('selected');
+            btn.style.backgroundColor = b.color + '33';
+        };
+        grid.appendChild(btn);
+    });
+    document.getElementById('poepModal').classList.remove('hidden');
+};
+
+// --- 5. RENDERING KAARTEN ---
 const renderCards = async () => {
     const containerElement = document.getElementById('cardContainer');
     const allCards = await getAllFromStore('cards');
@@ -155,11 +237,27 @@ const renderCards = async () => {
     else list.sort((a,b) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
     containerElement.innerHTML = '';
+    // events is al opgehaald bovenaan renderCards, hergebruik die variabele
     list.forEach(card => {
         const div = document.createElement('div');
         div.className = 'card'; div.style.backgroundColor = card.color; div.dataset.id = card.id;
         const fDate = card.last ? new Date(card.last).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Geen clicks';
         
+        // Controleer of deze kaart 'Eten' heet
+        let extraBtnHTML = '';
+        if (card.name.toLowerCase() === 'eten') {
+            extraBtnHTML = `<button class="meal-log-btn" onclick="openMealModal('${card.id}')">🍴 Maaltijd Loggen</button>`;
+        }
+        // Controleer of deze kaart 'Poep' heet
+        if (card.name.toLowerCase() === 'poep') {
+            extraBtnHTML = `<button class="meal-log-btn" onclick="openPoepModal('${card.id}')">💩 Poep Loggen</button>`;
+            // Laatste poep info tonen — gebruik de al opgehaalde events
+            const lastPoepEvent = events.filter(e => e.cardId === card.id && e.note).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+            if (lastPoepEvent) {
+                extraBtnHTML += `<span class="poep-card-info">${lastPoepEvent.note}</span>`;
+            }
+        }
+
         div.innerHTML = `
             <div class="drag-handle" style="display: ${currentSort==='manual'?'block':'none'}">☰</div>
             <button class="counter-btn" onclick="addEv('${card.id}', -${card.stepValue || 1})">-</button>
@@ -169,6 +267,7 @@ const renderCards = async () => {
                 </div>
                 <div class="card-count">${card.display}</div>
                 <span class="card-datetime">${fDate}</span>
+                ${extraBtnHTML}
             </div>
             <button class="counter-btn" onclick="addEv('${card.id}', ${card.stepValue || 1})">+</button>
             <div class="card-total">Totaal: ${card.total}</div>
@@ -177,7 +276,7 @@ const renderCards = async () => {
     });
 };
 
-// --- 5. DASHBOARD ---
+// --- 6. DASHBOARD ---
 const parseInputDate = (dateStr) => {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
@@ -274,14 +373,6 @@ const renderDashboard = async () => {
     });
 };
 
-function getWeekNumber(d) {
-    d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
-    var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-    return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
-}
-
-// --- 6. TAB LOGICA & SWIPE ---
 const switchTab = (newTab) => {
     if (currentTab === newTab) return;
     const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
@@ -312,24 +403,9 @@ const switchTab = (newTab) => {
     setTimeout(() => { clone.remove(); newContainer.classList.remove('slide-in-from-right', 'slide-in-from-left'); }, 350);
 };
 
-const handleGesture = () => {
-    const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
-    const currentIndex = tabsOrder.indexOf(currentTab);
-    const threshold = 50; // Hoeveel pixels moet je vegen?
-
-    if (touchendX < touchstartX - threshold) {
-        // Swipe naar links -> Volgende tab
-        if (currentIndex < tabsOrder.length - 1) switchTab(tabsOrder[currentIndex + 1]);
-    }
-    if (touchendX > touchstartX + threshold) {
-        // Swipe naar rechts -> Vorige tab
-        if (currentIndex > 0) switchTab(tabsOrder[currentIndex - 1]);
-    }
-};
-
 const getContainer = (tab) => tab === 'Dashboard' ? document.getElementById('dashboardContainer') : document.getElementById('cardContainer');
 
-// --- 7. MODALS & HELPERS ---
+// --- 7. MODALS, SETUP & HELPERS ---
 const toLocalDatetime = (isoString) => {
     const date = new Date(isoString);
     const pad = (n) => n.toString().padStart(2, '0');
@@ -350,8 +426,9 @@ const renderEventHistory = async (cardId) => {
     else {
         html += `<div class="event-history-list">`;
         cardEvents.forEach(ev => {
-            html += `<div class="event-row"><span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
+        html += `<div class="event-row"><span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
             <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
+            ${ev.note ? `<span style="font-size:0.7rem;color:#666;flex:1;text-align:right;padding-right:4px;" title="${ev.note}">📝</span>` : ''}
             <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button></div>`;
         });
         html += `</div>`;
@@ -373,43 +450,6 @@ window.openEditModal = async (id) => {
     document.getElementById('newCardModal').classList.remove('hidden');
 };
 
-const setupModals = () => {
-    const mainModal = document.getElementById('newCardModal');
-    document.getElementById('openModalBtn').onclick = () => {
-        editingCardId = null; document.getElementById('cardTitleInput').value = '';
-        document.getElementById('cardStartInput').value = 0; document.getElementById('cardStepInput').value = 1;
-        document.getElementById('editActionsArea').classList.add('hidden');
-        if (document.getElementById('eventHistoryContainer')) document.getElementById('eventHistoryContainer').innerHTML = '';
-        mainModal.classList.remove('hidden');
-    };
-    document.getElementById('saveCardBtn').onclick = async () => {
-        const name = document.getElementById('cardTitleInput').value.trim();
-        if (!name) return;
-        let card;
-        if (editingCardId) {
-            const all = await getAllFromStore('cards'); card = all.find(c => c.id === editingCardId);
-            card.name = name; card.color = selectedModalColor;
-            card.startValue = parseFloat(document.getElementById('cardStartInput').value);
-            card.stepValue = parseFloat(document.getElementById('cardStepInput').value);
-        } else {
-            card = { id: crypto.randomUUID(), name, color: selectedModalColor, startValue: parseFloat(document.getElementById('cardStartInput').value), stepValue: parseFloat(document.getElementById('cardStepInput').value), archived: false, deleted: false, orderIndex: Date.now() };
-        }
-        await saveCard(card); mainModal.classList.add('hidden'); renderCards();
-    };
-    document.getElementById('archiveCardBtn').onclick = async () => {
-        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
-        card.archived = !card.archived; await saveCard(card); mainModal.classList.add('hidden'); renderCards();
-    };
-    document.getElementById('deleteCardBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.remove('hidden');
-    document.getElementById('confirmDeleteBtn').onclick = async () => {
-        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
-        if (card) { card.deleted = true; await saveCard(card); }
-        document.getElementById('confirmDeleteModal').classList.add('hidden'); mainModal.classList.add('hidden'); renderCards();
-    };
-    document.getElementById('cancelModalBtn').onclick = () => mainModal.classList.add('hidden');
-    document.getElementById('cancelDeleteBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.add('hidden');
-};
-
 const getPeriods = () => {
     const now = new Date();
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -424,31 +464,119 @@ const updateColorSelection = () => {
     document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color === selectedModalColor));
 };
 
-// --- 8. START APP ---
+// --- 8. INITIALISATIE (Opstarten) ---
 initDB().then(() => {
-    setupModals();
     
-    // Swipe Listeners
-    document.addEventListener('touchstart', e => { touchstartX = e.changedTouches[0].screenX; }, false);
-    document.addEventListener('touchend', e => { touchendX = e.changedTouches[0].screenX; handleGesture(); }, false);
+    // Laad CSV op de achtergrond
+    loadMealsFromCSV();
 
-    const exportBtn = document.getElementById('exportBtn');
-    if (exportBtn) exportBtn.onclick = exportToCSV;
-
+    // Event Listeners (Knoppen)
+    document.getElementById('exportBtn').onclick = exportToCSV;
     document.getElementById('archiveTab').onclick = () => switchTab('Archive');
     document.getElementById('favoritesTab').onclick = () => switchTab('Favorites');
     document.getElementById('dashboardTab').onclick = () => switchTab('Dashboard');
+    
+    // Modal Nieuwe Kaart openen
+    document.getElementById('openModalBtn').onclick = () => {
+        editingCardId = null; 
+        document.getElementById('cardTitleInput').value = '';
+        document.getElementById('cardStartInput').value = 0; 
+        document.getElementById('cardStepInput').value = 1;
+        document.getElementById('editActionsArea').classList.add('hidden');
+        if (document.getElementById('eventHistoryContainer')) document.getElementById('eventHistoryContainer').innerHTML = '';
+        document.getElementById('newCardModal').classList.remove('hidden');
+    };
+
+    // Kaart opslaan
+    document.getElementById('saveCardBtn').onclick = async () => {
+        const name = document.getElementById('cardTitleInput').value.trim();
+        if (!name) return;
+        let card;
+        if (editingCardId) {
+            const all = await getAllFromStore('cards'); 
+            card = all.find(c => c.id === editingCardId);
+            card.name = name; card.color = selectedModalColor;
+            card.startValue = parseFloat(document.getElementById('cardStartInput').value);
+            card.stepValue = parseFloat(document.getElementById('cardStepInput').value);
+        } else {
+            card = { id: crypto.randomUUID(), name, color: selectedModalColor, startValue: parseFloat(document.getElementById('cardStartInput').value), stepValue: parseFloat(document.getElementById('cardStepInput').value), archived: false, deleted: false, orderIndex: Date.now() };
+        }
+        await saveCard(card); document.getElementById('newCardModal').classList.add('hidden'); renderCards();
+    };
+
+    // Kaart archiveren/verwijderen
+    document.getElementById('archiveCardBtn').onclick = async () => {
+        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
+        card.archived = !card.archived; await saveCard(card); document.getElementById('newCardModal').classList.add('hidden'); renderCards();
+    };
+    document.getElementById('deleteCardBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.remove('hidden');
+    document.getElementById('confirmDeleteBtn').onclick = async () => {
+        const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
+        if (card) { card.deleted = true; await saveCard(card); }
+        document.getElementById('confirmDeleteModal').classList.add('hidden'); document.getElementById('newCardModal').classList.add('hidden'); renderCards();
+    };
+
+    // Modal Annuleren Knoppen
+    document.getElementById('cancelModalBtn').onclick = () => document.getElementById('newCardModal').classList.add('hidden');
+    document.getElementById('cancelDeleteBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.add('hidden');
+    document.getElementById('cancelMealBtn').onclick = () => document.getElementById('mealModal').classList.add('hidden');
+
+    // Poep Modal Knoppen
+    document.getElementById('cancelPoepBtn').onclick = () => document.getElementById('poepModal').classList.add('hidden');
+    document.getElementById('confirmPoepBtn').onclick = async () => {
+        if (!activePoepCardId) return;
+        const bt = bristolTypes.find(b => b.type === selectedBristolType);
+        const remsporen = document.getElementById('poepRemsporen').checked;
+        const drijven = document.getElementById('poepDrijven').checked;
+        const stinkt = document.getElementById('poepStinkt').checked;
+        const extras = [remsporen && 'remsporen', drijven && 'drijft', stinkt && 'stinkt'].filter(Boolean);
+        const note = `Type ${bt.type} ${bt.label.replace('\n', ' ')} (${['bruin'].concat(extras).join(', ')})`;
+        const event = {
+            id: crypto.randomUUID(),
+            cardId: activePoepCardId,
+            timestamp: new Date().toISOString(),
+            delta: 1,
+            note
+        };
+        await saveEventStore(event);
+        document.getElementById('poepModal').classList.add('hidden');
+        renderCards();
+    };
+
+    // Maaltijd Bevestigen Knop
+    document.getElementById('confirmMealBtn').onclick = async () => {
+        const selected = document.getElementById('mealSelect').value;
+        const custom = document.getElementById('customMealInput').value.trim();
+        const mealName = custom || selected || "Onbekende maaltijd";
+
+        if (activeMealCardId) {
+            const event = { 
+                id: crypto.randomUUID(), 
+                cardId: activeMealCardId, 
+                timestamp: new Date().toISOString(), 
+                delta: 1,
+                note: mealName 
+            };
+            await saveEventStore(event);
+            document.getElementById('mealModal').classList.add('hidden');
+            renderCards();
+        }
+    };
+
+    // UI instellingen (Kleuren, Compact, Sorteren)
     const picker = document.getElementById('colorPicker');
     presetColors.forEach(col => {
         const s = document.createElement('div'); s.className = 'color-swatch'; s.style.backgroundColor = col; s.dataset.color = col;
         s.onclick = () => { selectedModalColor = col; updateColorSelection(); }; picker.appendChild(s);
     });
+
     const compactBtn = document.getElementById('compactBtn');
     compactBtn.onclick = () => {
         isCompactMode = !isCompactMode; localStorage.setItem('compactMode', isCompactMode);
         document.body.classList.toggle('compact-mode', isCompactMode); compactBtn.classList.toggle('active', isCompactMode);
     };
     if (isCompactMode) { document.body.classList.add('compact-mode'); compactBtn.classList.add('active'); }
+
     const tfBtn = document.getElementById('timeframeBtn');
     const tfMenu = document.getElementById('timeframeMenu');
     tfBtn.textContent = `[${currentTimeframe}]`;
@@ -459,10 +587,29 @@ initDB().then(() => {
             tfBtn.textContent = `[${currentTimeframe}]`; tfMenu.classList.add('hidden'); renderCards();
         };
     });
-    window.onclick = () => tfMenu.classList.add('hidden');
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.dropdown-container')) tfMenu.classList.add('hidden');
+    });
     document.getElementById('sortSelect').onchange = (e) => {
         currentSort = e.target.value; localStorage.setItem('sortMethod', currentSort); renderCards();
     };
+
+    // SWIPE LOGICA
+    document.addEventListener('touchstart', e => { touchstartX = e.changedTouches[0].screenX; }, false);
+    document.addEventListener('touchend', e => { 
+        touchendX = e.changedTouches[0].screenX; 
+        const tabsOrder = ['Archive', 'Favorites', 'Dashboard'];
+        const currentIndex = tabsOrder.indexOf(currentTab);
+        const threshold = 50;
+        if (touchendX < touchstartX - threshold && currentIndex < tabsOrder.length - 1) {
+            switchTab(tabsOrder[currentIndex + 1]);
+        }
+        if (touchendX > touchstartX + threshold && currentIndex > 0) {
+            switchTab(tabsOrder[currentIndex - 1]);
+        }
+    }, false);
+
+    // Initial render
     renderCards();
     new Sortable(document.getElementById('cardContainer'), {
         handle: '.drag-handle', animation: 150,
