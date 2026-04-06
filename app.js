@@ -103,7 +103,7 @@ const loadMealsFromCSV = async () => {
     }
 };
 
-// --- 3. CSV EXPORT (Met Notitie Veld) ---
+// --- 3. CSV EXPORT (Met Notitie Veld + Tab kolom) ---
 const exportToCSV = async () => {
     const cards = await getAllFromStore('cards');
     const events = await getAllFromStore('events');
@@ -113,17 +113,17 @@ const exportToCSV = async () => {
         return;
     }
 
-    let csv = 'Datum;Tijd;Kaart;Delta;Notitie\n';
+    let csv = 'Datum;Tijd;Kaart;Delta;Notitie;Tab\n';
     events.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     events.forEach(ev => {
         const card = cards.find(c => c.id === ev.cardId);
         const cardName = card ? card.name : 'Verwijderde Kaart';
+        const tab = card ? (card.archived ? 'Archief' : 'Favoriet') : 'Favoriet';
         const dateObj = new Date(ev.timestamp);
         const date = dateObj.toLocaleDateString('nl-NL');
         const time = dateObj.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-        // ev.note wordt toegevoegd voor de maaltijden
-        csv += `${date};${time};${cardName};${ev.delta};${ev.note || ''}\n`;
+        csv += `${date};${time};${cardName};${ev.delta};${ev.note || ''};${tab}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -136,7 +136,142 @@ const exportToCSV = async () => {
     document.body.removeChild(link);
 };
 
-// --- 4. CLICK EVENTS ---
+// --- 3b. CSV IMPORT ---
+let pendingImportData = null;
+
+const importFromCSV = async (file) => {
+    const text = await file.text();
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+    if (lines.length < 2) { showImportResult('❌ Bestand is leeg of ongeldig.', []); return; }
+
+    const header = lines[0].toLowerCase();
+    if (!header.includes('kaart') || !header.includes('delta')) {
+        showImportResult('❌ Ongeldig CSV formaat. Verwacht: Datum;Tijd;Kaart;Delta;Notitie', []); return;
+    }
+
+    const hasTabCol = header.includes('tab');
+    const allCards = await getAllFromStore('cards');
+    const existingNames = new Set(allCards.filter(c => !c.deleted).map(c => c.name.toLowerCase()));
+    const newCardsMap = new Map();
+
+    for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(';');
+        if (cols.length < 4) continue;
+        const naam = cols[2]?.trim();
+        if (!naam) continue;
+        const key = naam.toLowerCase();
+        if (!existingNames.has(key) && !newCardsMap.has(key)) {
+            const tabVal = hasTabCol ? (cols[5]?.trim().toLowerCase() || '') : '';
+            newCardsMap.set(key, { naam, archived: tabVal === 'archief' });
+        }
+    }
+
+    pendingImportData = { lines, newCardsMap, hasTabCol };
+
+    if (newCardsMap.size === 0) {
+        executeImport(new Set());
+    } else {
+        showImportCardPicker(newCardsMap);
+    }
+};
+
+const showImportCardPicker = (newCardsMap) => {
+    document.getElementById('importChoiceArea').classList.remove('hidden');
+    document.getElementById('importResultArea').classList.add('hidden');
+    const listEl = document.getElementById('importCardList');
+    listEl.innerHTML = '';
+    newCardsMap.forEach(({ naam, archived }, key) => {
+        const label = document.createElement('label');
+        label.className = 'import-card-check-label';
+        label.innerHTML = `<input type="checkbox" class="import-card-cb" data-key="${key}" checked>
+            <span class="import-card-name">${naam}</span>
+            <span class="import-card-tab">${archived ? '📦 Archief' : '⭐ Favoriet'}</span>`;
+        listEl.appendChild(label);
+    });
+    document.getElementById('importModal').classList.remove('hidden');
+};
+
+const executeImport = async (skipKeys) => {
+    const { lines, newCardsMap } = pendingImportData;
+    const allCards = await getAllFromStore('cards');
+    const allEvents = await getAllFromStore('events');
+    const existingEventIds = new Set(allEvents.map(e => e.id));
+    const cardMap = {};
+    allCards.forEach(c => { if (!c.deleted) cardMap[c.name.toLowerCase()] = c; });
+
+    let newCards = 0, newEvents = 0;
+    const skippedLines = [];
+    const createdCards = {};
+    const seenInFile = {};
+
+    for (let i = 1; i < lines.length; i++) {
+        const lineNum = i + 1;
+        const cols = lines[i].split(';');
+        if (cols.length < 4) { skippedLines.push(`Regel ${lineNum}: te weinig kolommen ("${lines[i]}")`); continue; }
+
+        const [datumStr, tijdStr, kaartNaam, deltaStr, ...rest] = cols;
+        const naam = kaartNaam?.trim();
+        const delta = parseFloat(deltaStr?.trim());
+        const note = rest[0]?.trim() || '';
+
+        if (!naam || isNaN(delta)) { skippedLines.push(`Regel ${lineNum}: ongeldige kaart of delta`); continue; }
+
+        const key = naam.toLowerCase();
+        if (skipKeys.has(key)) continue;
+
+        const dateParts = datumStr?.trim().split('-').map(Number);
+        const timeParts = tijdStr?.trim().split(':').map(Number);
+        let timestamp;
+        try {
+            if (dateParts.length !== 3 || dateParts.some(isNaN)) throw new Error();
+            const [day, month, year] = dateParts;
+            const d = new Date(year, month - 1, day, timeParts[0] || 0, timeParts[1] || 0);
+            if (isNaN(d.getTime())) throw new Error();
+            timestamp = d.toISOString();
+        } catch { skippedLines.push(`Regel ${lineNum}: datum onleesbaar ("${datumStr}")`); continue; }
+
+        let card = cardMap[key] || createdCards[key];
+        if (!card) {
+            const cardInfo = newCardsMap.get(key);
+            const color = presetColors[Math.floor(Math.random() * presetColors.length)];
+            card = { id: crypto.randomUUID(), name: naam, color, startValue: 0, stepValue: 1,
+                archived: cardInfo ? cardInfo.archived : false, deleted: false, orderIndex: Date.now() + i };
+            await saveCard(card);
+            createdCards[key] = card; cardMap[key] = card; newCards++;
+        }
+
+        const baseKey = `imp_${card.id}_${timestamp}_${delta}`;
+        if (!seenInFile[baseKey]) seenInFile[baseKey] = 0;
+        seenInFile[baseKey]++;
+        const eventId = `${baseKey}_${seenInFile[baseKey]}`;
+
+        if (existingEventIds.has(eventId)) { skippedLines.push(`Regel ${lineNum}: al aanwezig (${naam} op ${datumStr} ${tijdStr})`); continue; }
+
+        await saveEventStore({ id: eventId, cardId: card.id, timestamp, delta, note: note || undefined });
+        newEvents++;
+    }
+
+    const log = [
+        newCards > 0 ? `✅ ${newCards} nieuwe kaart${newCards !== 1 ? 'en' : ''} aangemaakt` : '',
+        `✅ ${newEvents} event${newEvents !== 1 ? 's' : ''} geïmporteerd`,
+        skippedLines.length > 0 ? `<details style="margin-top:0.5rem"><summary style="cursor:pointer;font-weight:700;">⚠️ ${skippedLines.length} overgeslagen — klik voor details</summary><div style="margin-top:0.5rem;font-size:0.8rem;color:#666;line-height:1.8">${skippedLines.map(l => `• ${l}`).join('<br>')}</div></details>` : '',
+    ].filter(Boolean);
+
+    showImportResult(null, log);
+    renderCards();
+};
+
+const showImportResult = (error, logLines) => {
+    document.getElementById('importChoiceArea').classList.add('hidden');
+    document.getElementById('importResultArea').classList.remove('hidden');
+    document.getElementById('importStatus').innerHTML = error
+        ? `<span style="color:var(--danger)">${error}</span>`
+        : logLines.map(l => `<div>${l}</div>`).join('');
+    document.getElementById('importModal').classList.remove('hidden');
+};
+
+
 window.addEv = async (id, delta) => {
     // Als het de poep-kaart is en delta positief, open de poep modal
     if (delta > 0) {
@@ -591,6 +726,35 @@ initDB().then(() => {
 
     // Event Listeners (Knoppen)
     document.getElementById('exportBtn').onclick = exportToCSV;
+
+    // CSV dropdown
+    const csvMenuBtn = document.getElementById('csvMenuBtn');
+    const csvMenu = document.getElementById('csvMenu');
+    csvMenuBtn.onclick = (e) => { e.stopPropagation(); csvMenu.classList.toggle('hidden'); };
+
+    let pendingImportFile = null;
+
+    document.getElementById('csvFileInput').onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        e.target.value = '';
+        csvMenu.classList.add('hidden');
+        importFromCSV(file);
+    };
+    document.getElementById('confirmImportBtn').onclick = () => {
+        const skipKeys = new Set();
+        document.querySelectorAll('.import-card-cb:not(:checked)').forEach(cb => skipKeys.add(cb.dataset.key));
+        executeImport(skipKeys);
+    };
+    document.getElementById('cancelImportBtn').onclick = () => {
+        document.getElementById('importModal').classList.add('hidden');
+        pendingImportData = null;
+    };
+    document.getElementById('closeImportModalBtn').onclick = () => {
+        document.getElementById('importModal').classList.add('hidden');
+        pendingImportData = null;
+    };
+
     document.getElementById('archiveTab').onclick = () => switchTab('Archive');
     document.getElementById('favoritesTab').onclick = () => switchTab('Favorites');
     document.getElementById('dashboardTab').onclick = () => switchTab('Dashboard');
@@ -696,18 +860,23 @@ initDB().then(() => {
     };
     if (isCompactMode) { document.body.classList.add('compact-mode'); compactBtn.classList.add('active'); }
 
+    const tfLabels = { U: 'Uur', V: 'Vandaag', W: 'Week', M: 'Maand', J: 'Jaar' };
     const tfBtn = document.getElementById('timeframeBtn');
     const tfMenu = document.getElementById('timeframeMenu');
-    tfBtn.textContent = `[${currentTimeframe}]`;
+    tfBtn.textContent = tfLabels[currentTimeframe] || currentTimeframe;
     tfBtn.onclick = (e) => { e.stopPropagation(); tfMenu.classList.toggle('hidden'); };
-    document.querySelectorAll('.dropdown-item').forEach(item => {
+    document.querySelectorAll('#timeframeMenu .dropdown-item').forEach(item => {
         item.onclick = () => {
             currentTimeframe = item.dataset.val; localStorage.setItem('timeframe', currentTimeframe);
-            tfBtn.textContent = `[${currentTimeframe}]`; tfMenu.classList.add('hidden'); renderCards();
+            tfBtn.textContent = tfLabels[currentTimeframe] || currentTimeframe;
+            tfMenu.classList.add('hidden'); renderCards();
         };
     });
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('.dropdown-container')) tfMenu.classList.add('hidden');
+        if (!e.target.closest('.dropdown-container')) {
+            tfMenu.classList.add('hidden');
+            csvMenu.classList.add('hidden');
+        }
     });
     document.getElementById('sortSelect').onchange = (e) => {
         currentSort = e.target.value; localStorage.setItem('sortMethod', currentSort); renderCards();
