@@ -22,6 +22,7 @@ header { margin-bottom: 1.5rem; }
 
 .icon-btn { background: white; border: 2px solid #ddd; border-radius: 10px; font-weight: bold; cursor: pointer; color: #555; width: 44px; height: 44px; }
 .icon-btn.active { background: #333; color: white; border-color: #333; }
+#timeframeBtn { width: auto; padding: 0 14px; font-size: 0.85rem; }
 
 .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; transition: opacity 0.3s; }
 select, .primary-btn, .secondary-btn { flex-grow: 1; padding: 0.8rem; border-radius: 10px; cursor: pointer; font-weight: bold; }
@@ -123,6 +124,37 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 .event-time-input { padding: 0.3rem; border: 1px solid #ccc; border-radius: 6px; font-size: 0.8rem; color: #333; flex-grow: 1; margin: 0 0.5rem; }
 .event-delete-btn { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: #bbb; transition: 0.2s; padding: 0.2rem; }
 .event-delete-btn:hover { color: var(--danger); }
+
+.csv-dropdown-container { flex-grow: 1; }
+.csv-dropdown-container #csvMenuBtn { width: 100%; }
+.csv-dropdown-container .dropdown-menu { top: 110%; left: 0; right: auto; min-width: 100%; }
+
+/* Import kaart kiezer */
+.import-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 0.6rem;
+}
+.import-card-check-label {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.5rem 0.4rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: background 0.15s;
+}
+.import-card-check-label:hover { background: #f0f0f0; }
+.import-card-check-label input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; }
+.import-card-name { flex: 1; font-weight: 600; }
+.import-card-tab { font-size: 0.75rem; color: #777; font-weight: 600; }
 
 /* --- ZOEKBALK --- */
 .search-container {
