@@ -32,7 +32,14 @@
                 <option value="alphabetical">Alphabetical</option>
                 <option value="highest">Highest</option>
             </select>
-            <button id="exportBtn" class="secondary-btn">⬇ CSV</button>
+            <div class="dropdown-container csv-dropdown-container">
+                <button id="csvMenuBtn" class="secondary-btn">CSV ▾</button>
+                <div id="csvMenu" class="dropdown-menu hidden">
+                    <div class="dropdown-item" id="exportBtn">⬇ Download data</div>
+                    <label class="dropdown-item" for="csvFileInput">⬆ Importeer CSV</label>
+                </div>
+            </div>
+            <input type="file" id="csvFileInput" accept=".csv" style="display:none">
             <button id="openModalBtn" class="primary-btn">+ New Card</button>
         </div>
 
@@ -115,6 +122,27 @@
             <div class="modal-actions">
                 <button id="cancelMealBtn" class="secondary-btn">Annuleren</button>
                 <button id="confirmMealBtn" class="primary-btn">Log Eten</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV IMPORT MODAL -->
+    <div id="importModal" class="modal hidden" style="z-index: 1050;">
+        <div class="modal-content">
+            <h2>⬆ CSV Importeren</h2>
+            <div id="importChoiceArea">
+                <p style="margin-bottom:0.8rem;font-size:0.9rem;color:#555;">De volgende nieuwe kaarten worden aangemaakt. Vink uit wat je <strong>niet</strong> wilt importeren:</p>
+                <div id="importCardList" class="import-card-list"></div>
+                <div class="modal-actions" style="margin-top:1rem;">
+                    <button id="cancelImportBtn" class="secondary-btn">Annuleren</button>
+                    <button id="confirmImportBtn" class="primary-btn">Importeren</button>
+                </div>
+            </div>
+            <div id="importResultArea" class="hidden">
+                <div id="importStatus" style="margin: 0.5rem 0; font-size:0.95rem; line-height:1.8;"></div>
+                <div class="modal-actions" style="margin-top:1rem;">
+                    <button id="closeImportModalBtn" class="primary-btn">Sluiten</button>
+                </div>
             </div>
         </div>
     </div>
