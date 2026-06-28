@@ -32,24 +32,11 @@
                 <option value="alphabetical">Alphabetical</option>
                 <option value="highest">Highest</option>
             </select>
-            <div class="dropdown-container csv-dropdown-container">
-                <button id="csvMenuBtn" class="secondary-btn">CSV ▾</button>
-                <div id="csvMenu" class="dropdown-menu hidden">
-                    <div class="dropdown-item" id="exportBtn">⬇ Download data</div>
-                    <label class="dropdown-item" for="csvFileInput">⬆ Importeer CSV</label>
-                </div>
-            </div>
-            <input type="file" id="csvFileInput" accept=".csv" style="display:none">
+            <button id="exportBtn" class="secondary-btn">⬇ CSV</button>
             <button id="openModalBtn" class="primary-btn">+ New Card</button>
         </div>
 
-        <div class="search-container">
-            <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" placeholder="Zoek kaart..." autocomplete="off">
-            <button id="searchClearBtn" class="search-clear hidden">✕</button>
-        </div>
-
-        <div id="searchResultsContainer" class="hidden-tab"></div>
+        <div id="weekInfo" class="week-info" aria-live="polite"></div>
 
         <div class="tabs-container">
             <button id="archiveTab" class="tab-btn">Archief</button>
@@ -62,6 +49,14 @@
         <div id="cardContainer"></div>
         <div id="dashboardContainer" class="hidden-tab">
             <div class="dashboard-header">
+                <div class="dashboard-source">
+                    <label for="dashboardScopeSelect">Cards</label>
+                    <select id="dashboardScopeSelect" onchange="setDashboardScope(this.value)">
+                        <option value="favorites" selected>Favorieten</option>
+                        <option value="archive">Archief</option>
+                        <option value="all">All cards</option>
+                    </select>
+                </div>
                 <div class="time-presets">
                     <select id="dashboardPreset" onchange="handlePresetChange(this.value)">
                         <option value="today">Vandaag</option>
@@ -109,72 +104,13 @@
                 <button id="deleteCardBtn" class="danger-btn-outline">Verwijderen</button>
                 <button id="archiveCardBtn" class="secondary-btn">Archiveer</button>
             </div>
-            </div>
-    </div>
-
-    <div id="mealModal" class="modal hidden">
-        <div class="modal-content">
-            <h2>Wat heb je gegeten?</h2>
-            <select id="mealSelect" style="width: 100%; padding: 10px; margin: 10px 0; border-radius: 8px; border: 1px solid #ccc;">
-                <option value="">-- Kies uit lijst --</option>
-            </select>
-            <input type="text" id="customMealInput" placeholder="Of typ zelf iets nieuws..." style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; margin-bottom: 20px;">
-            <div class="modal-actions">
-                <button id="cancelMealBtn" class="secondary-btn">Annuleren</button>
-                <button id="confirmMealBtn" class="primary-btn">Log Eten</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- CSV IMPORT MODAL -->
-    <div id="importModal" class="modal hidden" style="z-index: 1050;">
-        <div class="modal-content">
-            <h2>⬆ CSV Importeren</h2>
-            <div id="importChoiceArea">
-                <p style="margin-bottom:0.8rem;font-size:0.9rem;color:#555;">De volgende nieuwe kaarten worden aangemaakt. Vink uit wat je <strong>niet</strong> wilt importeren:</p>
-                <div id="importCardList" class="import-card-list"></div>
-                <div class="modal-actions" style="margin-top:1rem;">
-                    <button id="cancelImportBtn" class="secondary-btn">Annuleren</button>
-                    <button id="confirmImportBtn" class="primary-btn">Importeren</button>
-                </div>
-            </div>
-            <div id="importResultArea" class="hidden">
-                <div id="importStatus" style="margin: 0.5rem 0; font-size:0.95rem; line-height:1.8;"></div>
-                <div class="modal-actions" style="margin-top:1rem;">
-                    <button id="closeImportModalBtn" class="primary-btn">Sluiten</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- POEP MODAL (Bristol Stoelgangschaal) -->
-    <div id="poepModal" class="modal hidden" style="z-index: 1050;">
-        <div class="modal-content">
-            <h2>🚽 Poep Loggen</h2>
-            <p class="color-label">Type (Bristol schaal):</p>
-            <div class="bristol-grid" id="bristolGrid"></div>
-            <div class="poep-extras">
-                <label class="poep-checkbox-label">
-                    <input type="checkbox" id="poepRemsporen"> Remsporen
-                </label>
-                <label class="poep-checkbox-label">
-                    <input type="checkbox" id="poepDrijven"> Drijven
-                </label>
-                <label class="poep-checkbox-label">
-                    <input type="checkbox" id="poepStinkt"> Stinkt extra
-                </label>
-            </div>
-            <div class="modal-actions" style="margin-top:1.2rem;">
-                <button id="cancelPoepBtn" class="secondary-btn">Annuleren</button>
-                <button id="confirmPoepBtn" class="primary-btn">Log Poep 💩</button>
-            </div>
         </div>
     </div>
 
     <div id="confirmDeleteModal" class="modal hidden" style="z-index: 1100;">
         <div class="modal-content danger-zone">
             <h3>Kaart Verwijderen?</h3>
-            <p>De kaart wordt volledig verborgen. De historie blijft in de CSV.</p>
+            <p>De kaart wordt volledig verborgen. De historie blijft in de database.</p>
             <div class="modal-actions">
                 <button id="cancelDeleteBtn" class="secondary-btn">Terug</button>
                 <button id="confirmDeleteBtn" class="danger-btn">Verwijder</button>
@@ -182,7 +118,33 @@
         </div>
     </div>
 
+    <div id="exportModal" class="modal hidden" style="z-index: 1100;">
+        <div class="modal-content export-modal-content">
+            <h2>CSV export</h2>
+            <p class="modal-help-text">Kies welke cards je wilt meenemen in de CSV. Gebruik de snelle opties om direct per tabblad te selecteren.</p>
+
+            <div class="export-quick-actions">
+                <button type="button" class="secondary-btn export-scope-btn" data-export-scope="all">All cards</button>
+                <button type="button" class="secondary-btn export-scope-btn" data-export-scope="favorites">Favorieten</button>
+                <button type="button" class="secondary-btn export-scope-btn" data-export-scope="archive">Archief</button>
+            </div>
+
+            <div class="export-select-actions">
+                <button type="button" id="exportSelectAllBtn" class="text-btn">Alles aanvinken</button>
+                <button type="button" id="exportSelectNoneBtn" class="text-btn">Alles uitvinken</button>
+            </div>
+
+            <div id="exportSelectionContainer" class="export-selection-list"></div>
+
+            <div class="modal-actions">
+                <button id="cancelExportBtn" class="secondary-btn">Annuleren</button>
+                <button id="confirmExportBtn" class="primary-btn">Download CSV</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <script src="app.js"></script>
 </body>
 </html>
