@@ -16,6 +16,7 @@ let editingCardId = null;
 
 let chartInstance = null;
 let selectedDashboardCards = [];
+let dashboardTabFilter = 'favorites'; // 'all' | 'archive' | 'favorites'
 
 // Nieuwe variabelen voor Maaltijden en Swipe
 let mealsList = [];
@@ -36,6 +37,22 @@ const bristolTypes = [
     { type: 6, emoji: '💩', label: 'Pluizig\nzacht',   color: '#B8860B' },
     { type: 7, emoji: '💧', label: 'Vloei-\nbaar',     color: '#DAA520' },
 ];
+
+// --- 0. JAAR/WEEK INDICATOR ---
+const getISOWeekInfo = (date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return { year: d.getUTCFullYear(), week: weekNo };
+};
+
+const updateWeekIndicator = () => {
+    const { year, week } = getISOWeekInfo(new Date());
+    const el = document.getElementById('weekIndicator');
+    if (el) el.textContent = `${year} week ${week}`;
+};
 
 // --- 1. DATABASE ---
 const initDB = () => {
@@ -104,10 +121,15 @@ const loadMealsFromCSV = async () => {
 };
 
 // --- 3. CSV EXPORT (Met Notitie Veld + Tab kolom) ---
-const exportToCSV = async () => {
+const exportToCSV = async (cardIds = null) => {
     const cards = await getAllFromStore('cards');
-    const events = await getAllFromStore('events');
-    
+    let events = await getAllFromStore('events');
+
+    if (cardIds) {
+        const idSet = new Set(cardIds);
+        events = events.filter(ev => idSet.has(ev.cardId));
+    }
+
     if (events.length === 0) {
         alert("Geen gegevens om te exporteren.");
         return;
@@ -134,6 +156,22 @@ const exportToCSV = async () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+};
+
+// --- 3a. CSV EXPORT KAART KIEZER ---
+const populateExportCardList = async () => {
+    const allCards = await getAllFromStore('cards');
+    const cards = allCards.filter(c => !c.deleted).sort((a, b) => a.name.localeCompare(b.name));
+    const listEl = document.getElementById('exportCardList');
+    listEl.innerHTML = '';
+    cards.forEach(card => {
+        const label = document.createElement('label');
+        label.className = 'import-card-check-label';
+        label.innerHTML = `<input type="checkbox" class="export-card-cb" data-id="${card.id}" data-archived="${card.archived ? '1' : '0'}" checked>
+            <span class="import-card-name">${card.name}</span>
+            <span class="import-card-tab">${card.archived ? '📦 Archief' : '⭐ Favoriet'}</span>`;
+        listEl.appendChild(label);
+    });
 };
 
 // --- 3b. CSV IMPORT ---
@@ -516,7 +554,10 @@ window.handlePresetChange = (val) => {
 const renderDashboard = async () => {
     const allCards = await getAllFromStore('cards');
     const events = await getAllFromStore('events');
-    const activeCards = allCards.filter(c => !c.deleted);
+    let activeCards = allCards.filter(c => !c.deleted);
+    if (dashboardTabFilter === 'archive') activeCards = activeCards.filter(c => c.archived);
+    else if (dashboardTabFilter === 'favorites') activeCards = activeCards.filter(c => !c.archived);
+    activeCards.sort((a, b) => a.name.localeCompare(b.name));
     const startStr = document.getElementById('dashStart').value;
     const endStr = document.getElementById('dashEnd').value;
     const startDate = parseInputDate(startStr);
@@ -685,7 +726,10 @@ const updateColorSelection = () => {
 
 // --- 8. INITIALISATIE (Opstarten) ---
 initDB().then(() => {
-    
+
+    // Jaar/week indicator onder de titel
+    updateWeekIndicator();
+
     // Laad CSV op de achtergrond
     loadMealsFromCSV();
 
@@ -725,7 +769,31 @@ initDB().then(() => {
     };
 
     // Event Listeners (Knoppen)
-    document.getElementById('exportBtn').onclick = exportToCSV;
+    document.getElementById('exportBtn').onclick = async () => {
+        csvMenu.classList.add('hidden');
+        await populateExportCardList();
+        document.getElementById('exportModal').classList.remove('hidden');
+    };
+
+    // CSV Export modal: snelkeuze per tabblad + bevestigen/annuleren
+    document.querySelectorAll('.export-shortcut-btn').forEach(btn => {
+        btn.onclick = () => {
+            const mode = btn.dataset.tab; // 'all' | 'archive' | 'favorites'
+            document.querySelectorAll('.export-card-cb').forEach(cb => {
+                const isArchived = cb.dataset.archived === '1';
+                if (mode === 'all') cb.checked = true;
+                else if (mode === 'archive') cb.checked = isArchived;
+                else if (mode === 'favorites') cb.checked = !isArchived;
+            });
+        };
+    });
+    document.getElementById('confirmExportBtn').onclick = async () => {
+        const selectedIds = Array.from(document.querySelectorAll('.export-card-cb:checked')).map(cb => cb.dataset.id);
+        if (selectedIds.length === 0) { alert('Selecteer minstens één kaart om te downloaden.'); return; }
+        await exportToCSV(selectedIds);
+        document.getElementById('exportModal').classList.add('hidden');
+    };
+    document.getElementById('cancelExportBtn').onclick = () => document.getElementById('exportModal').classList.add('hidden');
 
     // CSV dropdown
     const csvMenuBtn = document.getElementById('csvMenuBtn');
@@ -880,6 +948,12 @@ initDB().then(() => {
     });
     document.getElementById('sortSelect').onchange = (e) => {
         currentSort = e.target.value; localStorage.setItem('sortMethod', currentSort); renderCards();
+    };
+
+    document.getElementById('dashboardTabFilter').onchange = (e) => {
+        dashboardTabFilter = e.target.value;
+        selectedDashboardCards = [];
+        renderDashboard();
     };
 
     // SWIPE LOGICA

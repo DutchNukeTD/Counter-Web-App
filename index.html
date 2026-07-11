@@ -26,6 +26,7 @@
                 <button id="compactBtn" class="icon-btn" title="Compact View">C</button>
             </div>
         </div>
+        <div id="weekIndicator" class="week-indicator"></div>
         <div class="controls">
             <select id="sortSelect">
                 <option value="manual">Manual Order</option>
@@ -71,6 +72,13 @@
                         <option value="6m">Afgelopen half jaar</option>
                         <option value="1y">Afgelopen jaar</option>
                         <option value="custom">Aangepaste periode...</option>
+                    </select>
+                </div>
+                <div class="time-presets">
+                    <select id="dashboardTabFilter">
+                        <option value="all">All cards</option>
+                        <option value="archive">Archief</option>
+                        <option value="favorites" selected>Favorieten</option>
                     </select>
                 </div>
                 <div id="customDateRange" class="hidden">
@@ -143,6 +151,25 @@
                 <div class="modal-actions" style="margin-top:1rem;">
                     <button id="closeImportModalBtn" class="primary-btn">Sluiten</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV EXPORT MODAL -->
+    <div id="exportModal" class="modal hidden" style="z-index: 1050;">
+        <div class="modal-content">
+            <h2>⬇ CSV Downloaden</h2>
+            <p style="margin-bottom:0.6rem;font-size:0.9rem;color:#555;">Snel kiezen per tabblad:</p>
+            <div class="export-shortcuts">
+                <button type="button" class="export-shortcut-btn" data-tab="all">All cards</button>
+                <button type="button" class="export-shortcut-btn" data-tab="archive">Archief</button>
+                <button type="button" class="export-shortcut-btn" data-tab="favorites">Favorieten</button>
+            </div>
+            <p style="margin-bottom:0.8rem;font-size:0.9rem;color:#555;">Vink aan welke kaarten je wilt downloaden:</p>
+            <div id="exportCardList" class="import-card-list"></div>
+            <div class="modal-actions" style="margin-top:1rem;">
+                <button id="cancelExportBtn" class="secondary-btn">Annuleren</button>
+                <button id="confirmExportBtn" class="primary-btn">Downloaden</button>
             </div>
         </div>
     </div>
