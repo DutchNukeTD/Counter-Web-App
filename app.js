@@ -2,6 +2,15 @@
  * Counter App - Volledig en Werkend
  */
 
+// Service worker registreren zodat de app ook zonder internet werkt.
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js')
+            .then(() => console.log('Service worker geregistreerd: app werkt nu ook offline.'))
+            .catch((err) => console.error('Registratie service worker mislukt:', err));
+    });
+}
+
 const dbName = 'CounterAppDB';
 let db;
 let currentSort = localStorage.getItem('sortMethod') || 'manual';
