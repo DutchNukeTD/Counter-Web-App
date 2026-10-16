@@ -681,6 +681,17 @@ const toLocalDatetime = (isoString) => {
     return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
+// --- KLIK-HISTORIE: tijd-knoppen, selectie en spreiden ---
+let historyStep = 15;        // stapgrootte in minuten (wordt bij elke keer openen weer 15)
+let historyOrderIds = null;  // vaste rij-volgorde tot de pop-up wordt gesloten
+let historySelected = [];    // geselecteerde event-id's, in volgorde van aanvinken
+let historyUndoStack = [];   // eerdere tijden per actie: [[{ id, timestamp }, ...], ...]
+
+const stepGroupHtml = (minusAction, plusAction) => `<div class="event-step-group">
+    <button type="button" class="step-btn" onclick="${minusAction}" title="Eerder">−</button>
+    <button type="button" class="step-btn step-value" onclick="openStepModal()" title="Stapgrootte wijzigen">${historyStep}m</button>
+    <button type="button" class="step-btn" onclick="${plusAction}" title="Later">+</button></div>`;
+
 const renderEventHistory = async (cardId) => {
     let container = document.getElementById('eventHistoryContainer');
     if (!container) {
@@ -689,20 +700,162 @@ const renderEventHistory = async (cardId) => {
         editActions.parentNode.insertBefore(container, editActions);
     }
     const events = await getAllFromStore('events');
-    const cardEvents = events.filter(e => e.cardId === cardId).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const cardEvents = events.filter(e => e.cardId === cardId);
+    if (!historyOrderIds) {
+        // Eerste keer na openen: sorteer op tijd en onthoud die volgorde.
+        cardEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        historyOrderIds = cardEvents.map(e => e.id);
+    } else {
+        cardEvents.sort((a, b) => historyOrderIds.indexOf(a.id) - historyOrderIds.indexOf(b.id));
+    }
+    // Verwijderde kliks uit de selectie halen
+    historySelected = historySelected.filter(id => cardEvents.some(e => e.id === id));
+
+    const oldList = container.querySelector('.event-history-list');
+    const oldScroll = oldList ? oldList.scrollTop : 0;
+
     let html = `<label style="display:block; font-size:0.8rem; font-weight:bold; margin-bottom:0.4rem; color:#777;">Klik Historie</label>`;
+
+    const selCount = historySelected.length;
+    if (selCount > 0 || historyUndoStack.length > 0) {
+        html += `<div class="history-toolbar">`;
+        if (selCount > 0) {
+            html += `<div class="history-toolbar-row">
+                <span class="history-sel-count">${selCount} geselecteerd</span>
+                ${stepGroupHtml('shiftSelectedEvents(-1)', 'shiftSelectedEvents(1)')}</div>
+                <div class="history-toolbar-row">
+                    <button type="button" class="history-action-btn" onclick="spreadSelectedEvents(-1)">◀ Verdeel eerder</button>
+                    <button type="button" class="history-action-btn" onclick="spreadSelectedEvents(1)">Verdeel later ▶</button></div>`;
+        }
+        html += `<div class="history-toolbar-row">`;
+        if (selCount > 0) html += `<button type="button" class="history-small-btn" onclick="clearEventSelection()">Deselecteer</button>`;
+        if (historyUndoStack.length > 0) html += `<button type="button" class="history-small-btn" onclick="undoHistoryChange()">↩ Ongedaan maken</button>`;
+        html += `</div></div>`;
+    }
+
     if (cardEvents.length === 0) html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data.</div>`;
     else {
         html += `<div class="event-history-list">`;
         cardEvents.forEach(ev => {
-        html += `<div class="event-row"><span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
+        const isSel = historySelected.includes(ev.id);
+        html += `<div class="event-row${isSel ? ' selected' : ''}">
+            <input type="checkbox" class="event-select" ${isSel ? 'checked' : ''} onchange="toggleEventSelect('${ev.id}', this.checked)">
+            <span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
             <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
+            ${stepGroupHtml(`shiftEvents(['${ev.id}'], -1)`, `shiftEvents(['${ev.id}'], 1)`)}
             ${ev.note ? `<span style="font-size:0.7rem;color:#666;flex:1;text-align:right;padding-right:4px;" title="${ev.note}">📝</span>` : ''}
             <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button></div>`;
         });
         html += `</div>`;
     }
     container.innerHTML = html;
+    const newList = container.querySelector('.event-history-list');
+    if (newList) newList.scrollTop = oldScroll;
+};
+
+const refreshAfterHistoryChange = async () => {
+    if (editingCardId) await renderEventHistory(editingCardId);
+    renderCards();
+    if (currentTab === 'Dashboard') renderDashboard();
+};
+
+// Past tijden aan. compute(events) geeft een lijst { id, time (ms) } terug.
+const applyHistoryChange = async (compute) => {
+    const events = await getAllFromStore('events');
+    const changes = compute(events);
+    const snapshot = [];
+    const toSave = [];
+    for (const ch of changes) {
+        const ev = events.find(e => e.id === ch.id);
+        if (!ev) continue;
+        snapshot.push({ id: ev.id, timestamp: ev.timestamp });
+        ev.timestamp = new Date(ch.time).toISOString();
+        toSave.push(ev);
+    }
+    if (!toSave.length) return;
+    historyUndoStack.push(snapshot);
+    if (historyUndoStack.length > 20) historyUndoStack.shift();
+    for (const ev of toSave) await saveEventStore(ev);
+    await refreshAfterHistoryChange();
+};
+
+// dir = -1 (eerder) of 1 (later), met de huidige stapgrootte
+window.shiftEvents = (ids, dir) => applyHistoryChange(events =>
+    ids.map(id => {
+        const ev = events.find(e => e.id === id);
+        return ev ? { id, time: new Date(ev.timestamp).getTime() + dir * historyStep * 60000 } : null;
+    }).filter(Boolean)
+);
+
+window.shiftSelectedEvents = (dir) => window.shiftEvents(historySelected.slice(), dir);
+
+// Eerst aangevinkte = ankerpunt. Aangevinkte kliks (in volgorde van aanvinken)
+// krijgen anker + 1n, 2n, 3n... (dir = 1) of anker - 1n, 2n, 3n... (dir = -1).
+window.spreadSelectedEvents = (dir) => applyHistoryChange(events => {
+    const ordered = historySelected.map(id => events.find(e => e.id === id)).filter(Boolean);
+    if (!ordered.length) return [];
+    const anchor = new Date(ordered[0].timestamp).getTime();
+    return ordered.map((ev, i) => ({ id: ev.id, time: anchor + dir * (i + 1) * historyStep * 60000 }));
+});
+
+window.undoHistoryChange = async () => {
+    const snapshot = historyUndoStack.pop();
+    if (!snapshot) return;
+    const events = await getAllFromStore('events');
+    for (const old of snapshot) {
+        const ev = events.find(e => e.id === old.id); // verwijderde kliks niet terugzetten
+        if (ev) { ev.timestamp = old.timestamp; await saveEventStore(ev); }
+    }
+    await refreshAfterHistoryChange();
+};
+
+window.toggleEventSelect = (id, checked) => {
+    historySelected = historySelected.filter(x => x !== id);
+    if (checked) historySelected.push(id);
+    if (editingCardId) renderEventHistory(editingCardId);
+};
+
+window.clearEventSelection = () => {
+    historySelected = [];
+    if (editingCardId) renderEventHistory(editingCardId);
+};
+
+// --- Stapgrootte pop-up (getal + snelkeuzes) ---
+const setHistoryStep = (value) => {
+    const n = Math.round(Number(value));
+    if (n >= 1) historyStep = n;
+};
+
+const closeStepModal = (applyInput = true) => {
+    const modal = document.getElementById('stepModal');
+    if (!modal) return;
+    if (applyInput) setHistoryStep(document.getElementById('stepInput').value);
+    modal.classList.add('hidden');
+    if (editingCardId) renderEventHistory(editingCardId);
+};
+
+window.openStepModal = () => {
+    let modal = document.getElementById('stepModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'stepModal'; modal.className = 'modal hidden'; modal.style.zIndex = '1200';
+        modal.innerHTML = `<div class="modal-content step-modal-content">
+            <h3>Stapgrootte (minuten)</h3>
+            <input type="number" id="stepInput" min="1" step="1" inputmode="numeric">
+            <div class="step-chips">${[1, 5, 15, 30, 45, 60].map(v => `<button type="button" class="step-chip" data-min="${v}">${v}</button>`).join('')}</div>
+            <div class="modal-actions"><button type="button" id="stepOkBtn" class="primary-btn">OK</button></div></div>`;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeStepModal(); });
+        modal.querySelectorAll('.step-chip').forEach(btn => {
+            btn.onclick = () => { setHistoryStep(btn.dataset.min); closeStepModal(false); };
+        });
+        document.getElementById('stepOkBtn').onclick = () => closeStepModal();
+        document.getElementById('stepInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') closeStepModal(); });
+    }
+    const input = document.getElementById('stepInput');
+    input.value = historyStep;
+    modal.querySelectorAll('.step-chip').forEach(btn => btn.classList.toggle('active', Number(btn.dataset.min) === historyStep));
+    modal.classList.remove('hidden');
 };
 
 window.openEditModal = async (id) => {
@@ -715,6 +868,7 @@ window.openEditModal = async (id) => {
     selectedModalColor = card.color;
     document.getElementById('archiveCardBtn').textContent = card.archived ? 'Herstel naar Fav' : 'Archiveer';
     document.getElementById('editActionsArea').classList.remove('hidden');
+    historyStep = 15; historyOrderIds = null; historySelected = []; historyUndoStack = [];
     updateColorSelection(); renderEventHistory(id);
     document.getElementById('newCardModal').classList.remove('hidden');
 };

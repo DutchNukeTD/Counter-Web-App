@@ -1,6 +1,6 @@
 // Verhoog deze versie elke keer dat je bestanden aanpast/publiceert,
 // anders blijft de browser de oude, gecachte versie tonen.
-const CACHE_NAME = 'event-counter-v1';
+const CACHE_NAME = 'event-counter-v2';
 
 // Bestanden die nodig zijn om de app volledig offline te laten werken.
 const urlsToCache = [
@@ -25,7 +25,7 @@ self.addEventListener('install', (event) => {
       // zodat één mislukte CDN-fetch niet de hele installatie laat falen.
       return Promise.all(
         urlsToCache.map((url) =>
-          cache.add(url).catch((err) => {
+          cache.add(new Request(url, { cache: 'reload' })).catch((err) => {
             console.warn('Kon niet cachen tijdens install:', url, err);
           })
         )

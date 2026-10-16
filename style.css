@@ -302,3 +302,30 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
     color: #333;
     width: 100%;
 }
+
+/* --- KLIK-HISTORIE: selectie, tijd-knoppen, spreiden --- */
+.event-history-list { max-height: 260px; }
+.event-row { flex-wrap: wrap; gap: 0.3rem 0.4rem; }
+.event-row.selected { background: #eef6ff; border-radius: 8px; }
+.event-row .event-time-input { flex: 1 1 150px; min-width: 150px; margin: 0; }
+.event-select { width: 20px; height: 20px; flex-shrink: 0; cursor: pointer; }
+
+.event-step-group { display: flex; gap: 4px; flex: none; }
+.step-btn { min-width: 34px; height: 34px; padding: 0 6px; border: 1px solid #bbb; background: white; border-radius: 8px; font-weight: 700; font-size: 0.95rem; color: #444; cursor: pointer; }
+.step-btn:active { background: #eee; }
+.step-btn.step-value { min-width: 48px; font-size: 0.8rem; color: var(--primary); border-color: var(--primary); }
+
+.history-toolbar { display: flex; flex-direction: column; gap: 0.5rem; background: #eef6ff; border: 1px solid #cfe3ff; border-radius: 10px; padding: 0.6rem; margin-bottom: 0.6rem; }
+.history-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.history-toolbar-row:empty { display: none; }
+.history-sel-count { font-size: 0.85rem; font-weight: 700; color: #333; }
+.history-action-btn, .history-small-btn { flex: 1; padding: 0.6rem 0.4rem; border-radius: 10px; background: white; font-weight: 700; font-size: 0.8rem; cursor: pointer; }
+.history-action-btn { border: 2px solid var(--primary); color: var(--primary); }
+.history-small-btn { border: 2px solid #bbb; color: #555; }
+
+/* Stapgrootte pop-up */
+.step-modal-content h3 { margin-bottom: 0.8rem; }
+#stepInput { width: 100%; padding: 0.8rem; border-radius: 10px; border: 1px solid #ddd; font-size: 1.1rem; margin-bottom: 0.8rem; }
+.step-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 1.2rem; }
+.step-chip { padding: 0.7rem; border-radius: 10px; border: 2px solid #ddd; background: white; font-weight: 700; font-size: 1rem; cursor: pointer; }
+.step-chip.active { border-color: var(--primary); color: var(--primary); }
