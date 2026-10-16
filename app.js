@@ -339,24 +339,6 @@ window.addEv = async (id, delta) => {
     if(currentTab === 'Dashboard') renderDashboard();
 };
 
-window.updateEventTimestamp = async (eventId, newLocalTime) => {
-    const events = await getAllFromStore('events');
-    const event = events.find(e => e.id === eventId);
-    if (event) {
-        event.timestamp = new Date(newLocalTime).toISOString();
-        await saveEventStore(event);
-        renderCards(); 
-        if(currentTab === 'Dashboard') renderDashboard();
-    }
-};
-
-window.removeEvent = async (eventId) => {
-    await deleteEventFromDB(eventId);
-    if (editingCardId) renderEventHistory(editingCardId); 
-    renderCards(); 
-    if(currentTab === 'Dashboard') renderDashboard();
-};
-
 window.openMealModal = (id) => {
     activeMealCardId = id;
     document.getElementById('mealModal').classList.remove('hidden');
@@ -681,149 +663,152 @@ const toLocalDatetime = (isoString) => {
     return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
-// --- KLIK-HISTORIE: tijd-knoppen, selectie en spreiden ---
-let historyStep = 15;        // stapgrootte in minuten (wordt bij elke keer openen weer 15)
-let historyOrderIds = null;  // vaste rij-volgorde tot de pop-up wordt gesloten
-let historySelected = [];    // geselecteerde event-id's, in volgorde van aanvinken
-let historyUndoStack = [];   // eerdere tijden per actie: [[{ id, timestamp }, ...], ...]
+// --- KLIK-HISTORIE: selectie en tijd-knoppen (aanpassingen zijn een concept tot Opslaan) ---
+const HISTORY_STEP_KEY = 'eventCounterHistoryStep';
+let historyStep = (() => {   // stapgrootte in minuten, wordt onthouden
+    try { const v = parseInt(localStorage.getItem(HISTORY_STEP_KEY), 10); return v >= 1 ? v : 15; }
+    catch (e) { return 15; }
+})();
+let historyStaged = false;        // "Trapsgewijs": 1e geselecteerde 1x stap, 2e 2x stap, enz.
+let historySelected = new Set();  // geselecteerde event-id's
+let historyDraft = null;          // { cardId, events, original: Map(id -> timestamp), deleted: Set(id) }
 
-const stepGroupHtml = (minusAction, plusAction) => `<div class="event-step-group">
-    <button type="button" class="step-btn" onclick="${minusAction}" title="Eerder">−</button>
-    <button type="button" class="step-btn step-value" onclick="openStepModal()" title="Stapgrootte wijzigen">${historyStep}m</button>
-    <button type="button" class="step-btn" onclick="${plusAction}" title="Later">+</button></div>`;
+const loadHistoryDraft = async (cardId) => {
+    const all = await getAllFromStore('events');
+    const events = all.filter(e => e.cardId === cardId)
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .map(e => ({ ...e }));
+    historyDraft = { cardId, events, original: new Map(events.map(e => [e.id, e.timestamp])), deleted: new Set() };
+};
 
-const renderEventHistory = async (cardId) => {
+const visibleDraftEvents = () => historyDraft ? historyDraft.events.filter(e => !historyDraft.deleted.has(e.id)) : [];
+
+// Alle aanpassingen in 1 keer naar de database (aangeroepen door Opslaan en Archiveer)
+const commitHistoryDraft = async () => {
+    if (!historyDraft || historyDraft.cardId !== editingCardId) return;
+    const toSave = historyDraft.events.filter(e => !historyDraft.deleted.has(e.id) && e.timestamp !== historyDraft.original.get(e.id));
+    const toDelete = [...historyDraft.deleted];
+    if (toSave.length || toDelete.length) {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(['events'], 'readwrite');
+            const store = tx.objectStore('events');
+            toSave.forEach(ev => store.put(ev));
+            toDelete.forEach(id => store.delete(id));
+            tx.oncomplete = () => resolve();
+            tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+    }
+    historyDraft = null;
+};
+
+const setRowTime = (ev) => {
+    const input = document.querySelector(`.event-row[data-id="${ev.id}"] .event-time-input`);
+    if (input) input.value = toLocalDatetime(ev.timestamp);
+};
+
+const renderHistoryToolbar = () => {
+    const el = document.getElementById('historyToolbar');
+    if (!el) return;
+    const n = historySelected.size;
+    const dis = n === 0 ? 'disabled' : '';
+    el.innerHTML = `<div class="history-toolbar-row">
+            <label class="history-mode-label"><input type="checkbox" ${historyStaged ? 'checked' : ''} onchange="toggleHistoryStaged(this.checked)"> Trapsgewijs</label>
+            <div class="event-step-group">
+                <button type="button" class="step-btn" ${dis} onclick="shiftSelectedEvents(-1)" title="Eerder">−</button>
+                <button type="button" class="step-btn step-value" onclick="openStepModal()" title="Stapgrootte wijzigen">${historyStep}m</button>
+                <button type="button" class="step-btn" ${dis} onclick="shiftSelectedEvents(1)" title="Later">+</button>
+            </div></div>
+        ${historyStaged ? `<div class="history-hint">Van boven naar beneden: 1×, 2×, 3× de stap</div>` : ''}
+        <div class="history-toolbar-row">
+            <span class="history-sel-count">${n} geselecteerd</span>
+            <button type="button" class="history-small-btn" ${dis} onclick="clearEventSelection()">Deselecteer</button></div>`;
+};
+
+const renderEventHistory = () => {
     let container = document.getElementById('eventHistoryContainer');
     if (!container) {
         container = document.createElement('div'); container.id = 'eventHistoryContainer';
         const editActions = document.getElementById('editActionsArea');
         editActions.parentNode.insertBefore(container, editActions);
     }
-    const events = await getAllFromStore('events');
-    const cardEvents = events.filter(e => e.cardId === cardId);
-    if (!historyOrderIds) {
-        // Eerste keer na openen: sorteer op tijd en onthoud die volgorde.
-        cardEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        historyOrderIds = cardEvents.map(e => e.id);
-    } else {
-        cardEvents.sort((a, b) => historyOrderIds.indexOf(a.id) - historyOrderIds.indexOf(b.id));
-    }
-    // Verwijderde kliks uit de selectie halen
-    historySelected = historySelected.filter(id => cardEvents.some(e => e.id === id));
-
-    const oldList = container.querySelector('.event-history-list');
-    const oldScroll = oldList ? oldList.scrollTop : 0;
-
-    let html = `<label style="display:block; font-size:0.8rem; font-weight:bold; margin-bottom:0.4rem; color:#777;">Klik Historie</label>`;
-
-    const selCount = historySelected.length;
-    if (selCount > 0 || historyUndoStack.length > 0) {
-        html += `<div class="history-toolbar">`;
-        if (selCount > 0) {
-            html += `<div class="history-toolbar-row">
-                <span class="history-sel-count">${selCount} geselecteerd</span>
-                ${stepGroupHtml('shiftSelectedEvents(-1)', 'shiftSelectedEvents(1)')}</div>
-                <div class="history-toolbar-row">
-                    <button type="button" class="history-action-btn" onclick="spreadSelectedEvents(-1)">◀ Verdeel eerder</button>
-                    <button type="button" class="history-action-btn" onclick="spreadSelectedEvents(1)">Verdeel later ▶</button></div>`;
-        }
-        html += `<div class="history-toolbar-row">`;
-        if (selCount > 0) html += `<button type="button" class="history-small-btn" onclick="clearEventSelection()">Deselecteer</button>`;
-        if (historyUndoStack.length > 0) html += `<button type="button" class="history-small-btn" onclick="undoHistoryChange()">↩ Ongedaan maken</button>`;
-        html += `</div></div>`;
-    }
-
-    if (cardEvents.length === 0) html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data.</div>`;
+    const events = visibleDraftEvents();
+    let html = `<div id="historyToolbar" class="history-toolbar"></div>
+        <label style="display:block; font-size:0.8rem; font-weight:bold; margin-bottom:0.4rem; color:#777;">Klik Historie</label>`;
+    if (events.length === 0) html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data.</div>`;
     else {
         html += `<div class="event-history-list">`;
-        cardEvents.forEach(ev => {
-        const isSel = historySelected.includes(ev.id);
-        html += `<div class="event-row${isSel ? ' selected' : ''}">
-            <input type="checkbox" class="event-select" ${isSel ? 'checked' : ''} onchange="toggleEventSelect('${ev.id}', this.checked)">
-            <span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
-            <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
-            ${stepGroupHtml(`shiftEvents(['${ev.id}'], -1)`, `shiftEvents(['${ev.id}'], 1)`)}
-            ${ev.note ? `<span style="font-size:0.7rem;color:#666;flex:1;text-align:right;padding-right:4px;" title="${ev.note}">📝</span>` : ''}
-            <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button></div>`;
+        events.forEach(ev => {
+            const isSel = historySelected.has(ev.id);
+            html += `<div class="event-row${isSel ? ' selected' : ''}" data-id="${ev.id}">
+                <input type="checkbox" class="event-select" ${isSel ? 'checked' : ''} onchange="toggleEventSelect('${ev.id}', this.checked)">
+                <span class="event-delta ${ev.delta > 0 ? 'pos' : 'neg'}">${ev.delta > 0 ? '+'+ev.delta : ev.delta}</span>
+                <input type="datetime-local" class="event-time-input" value="${toLocalDatetime(ev.timestamp)}" onchange="updateEventTimestamp('${ev.id}', this.value)">
+                ${ev.note ? `<span style="font-size:0.7rem;color:#666;flex:1;text-align:right;padding-right:4px;" title="${ev.note}">📝</span>` : ''}
+                <button type="button" class="event-delete-btn" onclick="removeEvent('${ev.id}')">🗑️</button></div>`;
         });
         html += `</div>`;
     }
     container.innerHTML = html;
-    const newList = container.querySelector('.event-history-list');
-    if (newList) newList.scrollTop = oldScroll;
+    renderHistoryToolbar();
 };
 
-const refreshAfterHistoryChange = async () => {
-    if (editingCardId) await renderEventHistory(editingCardId);
-    renderCards();
-    if (currentTab === 'Dashboard') renderDashboard();
+// Tijd via het tijdvak van 1 klik aanpassen (concept)
+window.updateEventTimestamp = (eventId, newLocalTime) => {
+    const ev = historyDraft && historyDraft.events.find(e => e.id === eventId);
+    if (!ev) return;
+    if (newLocalTime) ev.timestamp = new Date(newLocalTime).toISOString();
+    else setRowTime(ev); // leeg veld: oude tijd terugzetten
 };
 
-// Past tijden aan. compute(events) geeft een lijst { id, time (ms) } terug.
-const applyHistoryChange = async (compute) => {
-    const events = await getAllFromStore('events');
-    const changes = compute(events);
-    const snapshot = [];
-    const toSave = [];
-    for (const ch of changes) {
-        const ev = events.find(e => e.id === ch.id);
-        if (!ev) continue;
-        snapshot.push({ id: ev.id, timestamp: ev.timestamp });
-        ev.timestamp = new Date(ch.time).toISOString();
-        toSave.push(ev);
-    }
-    if (!toSave.length) return;
-    historyUndoStack.push(snapshot);
-    if (historyUndoStack.length > 20) historyUndoStack.shift();
-    for (const ev of toSave) await saveEventStore(ev);
-    await refreshAfterHistoryChange();
-};
-
-// dir = -1 (eerder) of 1 (later), met de huidige stapgrootte
-window.shiftEvents = (ids, dir) => applyHistoryChange(events =>
-    ids.map(id => {
-        const ev = events.find(e => e.id === id);
-        return ev ? { id, time: new Date(ev.timestamp).getTime() + dir * historyStep * 60000 } : null;
-    }).filter(Boolean)
-);
-
-window.shiftSelectedEvents = (dir) => window.shiftEvents(historySelected.slice(), dir);
-
-// Eerst aangevinkte = ankerpunt. Aangevinkte kliks (in volgorde van aanvinken)
-// krijgen anker + 1n, 2n, 3n... (dir = 1) of anker - 1n, 2n, 3n... (dir = -1).
-window.spreadSelectedEvents = (dir) => applyHistoryChange(events => {
-    const ordered = historySelected.map(id => events.find(e => e.id === id)).filter(Boolean);
-    if (!ordered.length) return [];
-    const anchor = new Date(ordered[0].timestamp).getTime();
-    return ordered.map((ev, i) => ({ id: ev.id, time: anchor + dir * (i + 1) * historyStep * 60000 }));
-});
-
-window.undoHistoryChange = async () => {
-    const snapshot = historyUndoStack.pop();
-    if (!snapshot) return;
-    const events = await getAllFromStore('events');
-    for (const old of snapshot) {
-        const ev = events.find(e => e.id === old.id); // verwijderde kliks niet terugzetten
-        if (ev) { ev.timestamp = old.timestamp; await saveEventStore(ev); }
-    }
-    await refreshAfterHistoryChange();
+// Klik verwijderen (concept, pas definitief bij Opslaan)
+window.removeEvent = (eventId) => {
+    if (!historyDraft) return;
+    historyDraft.deleted.add(eventId);
+    historySelected.delete(eventId);
+    const row = document.querySelector(`.event-row[data-id="${eventId}"]`);
+    if (row) row.remove();
+    if (visibleDraftEvents().length === 0) renderEventHistory(); else renderHistoryToolbar();
 };
 
 window.toggleEventSelect = (id, checked) => {
-    historySelected = historySelected.filter(x => x !== id);
-    if (checked) historySelected.push(id);
-    if (editingCardId) renderEventHistory(editingCardId);
+    if (checked) historySelected.add(id); else historySelected.delete(id);
+    const row = document.querySelector(`.event-row[data-id="${id}"]`);
+    if (row) row.classList.toggle('selected', checked);
+    renderHistoryToolbar();
 };
 
 window.clearEventSelection = () => {
-    historySelected = [];
-    if (editingCardId) renderEventHistory(editingCardId);
+    historySelected.clear();
+    document.querySelectorAll('.event-row.selected').forEach(row => {
+        row.classList.remove('selected');
+        row.querySelector('.event-select').checked = false;
+    });
+    renderHistoryToolbar();
+};
+
+window.toggleHistoryStaged = (checked) => {
+    historyStaged = checked;
+    renderHistoryToolbar();
+};
+
+// dir = -1 (eerder) of 1 (later). Altijd: huidige tijd van de klik +/- (stap, of k x stap bij Trapsgewijs).
+// Bij Trapsgewijs bepaalt de positie in de lijst (van boven naar beneden) de k.
+window.shiftSelectedEvents = (dir) => {
+    if (!historyDraft || historySelected.size === 0) return;
+    visibleDraftEvents().filter(e => historySelected.has(e.id)).forEach((ev, i) => {
+        const mult = historyStaged ? i + 1 : 1;
+        ev.timestamp = new Date(new Date(ev.timestamp).getTime() + dir * mult * historyStep * 60000).toISOString();
+        setRowTime(ev);
+    });
 };
 
 // --- Stapgrootte pop-up (getal + snelkeuzes) ---
 const setHistoryStep = (value) => {
     const n = Math.round(Number(value));
-    if (n >= 1) historyStep = n;
+    if (n >= 1) {
+        historyStep = n;
+        try { localStorage.setItem(HISTORY_STEP_KEY, String(n)); } catch (e) {}
+    }
 };
 
 const closeStepModal = (applyInput = true) => {
@@ -831,7 +816,7 @@ const closeStepModal = (applyInput = true) => {
     if (!modal) return;
     if (applyInput) setHistoryStep(document.getElementById('stepInput').value);
     modal.classList.add('hidden');
-    if (editingCardId) renderEventHistory(editingCardId);
+    renderHistoryToolbar();
 };
 
 window.openStepModal = () => {
@@ -868,8 +853,9 @@ window.openEditModal = async (id) => {
     selectedModalColor = card.color;
     document.getElementById('archiveCardBtn').textContent = card.archived ? 'Herstel naar Fav' : 'Archiveer';
     document.getElementById('editActionsArea').classList.remove('hidden');
-    historyStep = 15; historyOrderIds = null; historySelected = []; historyUndoStack = [];
-    updateColorSelection(); renderEventHistory(id);
+    historyStaged = false; historySelected = new Set();
+    await loadHistoryDraft(id);
+    updateColorSelection(); renderEventHistory();
     document.getElementById('newCardModal').classList.remove('hidden');
 };
 
@@ -1015,23 +1001,26 @@ initDB().then(() => {
         } else {
             card = { id: crypto.randomUUID(), name, color: selectedModalColor, startValue: parseFloat(document.getElementById('cardStartInput').value), stepValue: parseFloat(document.getElementById('cardStepInput').value), archived: false, deleted: false, orderIndex: Date.now() };
         }
+        await commitHistoryDraft();
         await saveCard(card); document.getElementById('newCardModal').classList.add('hidden'); renderCards();
     };
 
     // Kaart archiveren/verwijderen
     document.getElementById('archiveCardBtn').onclick = async () => {
         const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
+        await commitHistoryDraft();
         card.archived = !card.archived; await saveCard(card); document.getElementById('newCardModal').classList.add('hidden'); renderCards();
     };
     document.getElementById('deleteCardBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.remove('hidden');
     document.getElementById('confirmDeleteBtn').onclick = async () => {
         const all = await getAllFromStore('cards'); const card = all.find(c => c.id === editingCardId);
         if (card) { card.deleted = true; await saveCard(card); }
+        historyDraft = null;
         document.getElementById('confirmDeleteModal').classList.add('hidden'); document.getElementById('newCardModal').classList.add('hidden'); renderCards();
     };
 
     // Modal Annuleren Knoppen
-    document.getElementById('cancelModalBtn').onclick = () => document.getElementById('newCardModal').classList.add('hidden');
+    document.getElementById('cancelModalBtn').onclick = () => { historyDraft = null; document.getElementById('newCardModal').classList.add('hidden'); };
     document.getElementById('cancelDeleteBtn').onclick = () => document.getElementById('confirmDeleteModal').classList.add('hidden');
     document.getElementById('cancelMealBtn').onclick = () => document.getElementById('mealModal').classList.add('hidden');
 

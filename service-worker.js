@@ -1,6 +1,6 @@
 // Verhoog deze versie elke keer dat je bestanden aanpast/publiceert,
 // anders blijft de browser de oude, gecachte versie tonen.
-const CACHE_NAME = 'event-counter-v2';
+const CACHE_NAME = 'event-counter-v3';
 
 // Bestanden die nodig zijn om de app volledig offline te laten werken.
 const urlsToCache = [

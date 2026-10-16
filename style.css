@@ -303,25 +303,25 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
     width: 100%;
 }
 
-/* --- KLIK-HISTORIE: selectie, tijd-knoppen, spreiden --- */
-.event-history-list { max-height: 260px; }
-.event-row { flex-wrap: wrap; gap: 0.3rem 0.4rem; }
+/* --- KLIK-HISTORIE: selectie en tijd-knoppen --- */
+.event-row { gap: 0.3rem; }
 .event-row.selected { background: #eef6ff; border-radius: 8px; }
-.event-row .event-time-input { flex: 1 1 150px; min-width: 150px; margin: 0; }
+.event-row .event-time-input { min-width: 0; margin: 0 0.2rem; }
 .event-select { width: 20px; height: 20px; flex-shrink: 0; cursor: pointer; }
 
-.event-step-group { display: flex; gap: 4px; flex: none; }
-.step-btn { min-width: 34px; height: 34px; padding: 0 6px; border: 1px solid #bbb; background: white; border-radius: 8px; font-weight: 700; font-size: 0.95rem; color: #444; cursor: pointer; }
-.step-btn:active { background: #eee; }
-.step-btn.step-value { min-width: 48px; font-size: 0.8rem; color: var(--primary); border-color: var(--primary); }
-
-.history-toolbar { display: flex; flex-direction: column; gap: 0.5rem; background: #eef6ff; border: 1px solid #cfe3ff; border-radius: 10px; padding: 0.6rem; margin-bottom: 0.6rem; }
+.history-toolbar { display: flex; flex-direction: column; gap: 0.5rem; background: #eef6ff; border: 1px solid #cfe3ff; border-radius: 10px; padding: 0.6rem; margin: 1rem 0 0.8rem; }
 .history-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
-.history-toolbar-row:empty { display: none; }
+.history-mode-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; font-weight: 700; color: #333; cursor: pointer; }
+.history-mode-label input { width: 18px; height: 18px; cursor: pointer; }
+.history-hint { font-size: 0.75rem; color: #666; }
 .history-sel-count { font-size: 0.85rem; font-weight: 700; color: #333; }
-.history-action-btn, .history-small-btn { flex: 1; padding: 0.6rem 0.4rem; border-radius: 10px; background: white; font-weight: 700; font-size: 0.8rem; cursor: pointer; }
-.history-action-btn { border: 2px solid var(--primary); color: var(--primary); }
-.history-small-btn { border: 2px solid #bbb; color: #555; }
+.history-small-btn { padding: 0.4rem 0.9rem; border-radius: 10px; background: white; border: 2px solid #bbb; color: #555; font-weight: 700; font-size: 0.8rem; cursor: pointer; }
+
+.event-step-group { display: flex; gap: 4px; flex: none; }
+.step-btn { min-width: 38px; height: 38px; padding: 0 6px; border: 1px solid #bbb; background: white; border-radius: 8px; font-weight: 700; font-size: 1rem; color: #444; cursor: pointer; }
+.step-btn:active { background: #eee; }
+.step-btn.step-value { min-width: 52px; font-size: 0.85rem; color: var(--primary); border-color: var(--primary); }
+.step-btn:disabled, .history-small-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* Stapgrootte pop-up */
 .step-modal-content h3 { margin-bottom: 0.8rem; }
