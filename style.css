@@ -309,7 +309,7 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 .event-row .event-time-input { min-width: 0; margin: 0 0.2rem; }
 .event-select { width: 20px; height: 20px; flex-shrink: 0; cursor: pointer; }
 
-.history-toolbar { display: flex; flex-direction: column; gap: 0.5rem; background: #eef6ff; border: 1px solid #cfe3ff; border-radius: 10px; padding: 0.6rem; margin: 1rem 0 0.8rem; }
+.history-toolbar { display: flex; flex-direction: column; gap: 0.5rem; background: #eef6ff; border: 1px solid #cfe3ff; border-radius: 10px; padding: 0.6rem; margin: 0 0 0.8rem; }
 .history-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
 .history-mode-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; font-weight: 700; color: #333; cursor: pointer; }
 .history-mode-label input { width: 18px; height: 18px; cursor: pointer; }
@@ -329,3 +329,24 @@ body.compact-mode .card-datetime { font-size: 9px; margin-top: 2px; }
 .step-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 1.2rem; }
 .step-chip { padding: 0.7rem; border-radius: 10px; border: 2px solid #ddd; background: white; font-weight: 700; font-size: 1rem; cursor: pointer; }
 .step-chip.active { border-color: var(--primary); color: var(--primary); }
+
+/* --- ACHTERAF TOEVOEGEN --- */
+#eventHistoryContainer { margin-top: 1rem; }
+.history-add-btn { display: block; width: 100%; margin: 0 0 0.8rem; padding: 0.8rem; border-radius: 10px; background: white; color: var(--primary); border: 2px solid var(--primary); font-weight: 700; cursor: pointer; }
+.add-label { display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 0.3rem; color: #777; }
+.add-modal-content h3 { margin-bottom: 0.8rem; }
+.add-modal-content input[type="number"], .add-modal-content input[type="datetime-local"], .add-modal-content input[type="date"], .add-modal-content input[type="time"] { width: 100%; padding: 0.7rem; border-radius: 10px; border: 1px solid #ddd; font-size: 1rem; margin-bottom: 0.9rem; }
+.add-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; margin-bottom: 1rem; }
+.add-mode-btn { padding: 0.6rem 0.2rem; border-radius: 10px; border: 2px solid #ddd; background: white; font-weight: 700; font-size: 0.78rem; cursor: pointer; }
+/* Snelkeuze Vandaag / Gisteren */
+.add-quick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem; margin-bottom: 0.5rem; }
+.add-day-btn { padding: 0.6rem 0.2rem; border-radius: 10px; border: 2px solid #ddd; background: white; font-weight: 700; font-size: 0.78rem; cursor: pointer; }
+.add-mode-btn.active, .add-day-btn.active { border-color: var(--primary); color: var(--primary); background: #eef6ff; }
+.add-hint { font-size: 0.75rem; color: #777; margin: -0.5rem 0 0.9rem; }
+.add-preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.3rem; }
+.add-preview-head .add-label { margin-bottom: 0; }
+.add-preview { max-height: 160px; overflow-y: auto; background: #fafafa; border: 1px solid #eee; border-radius: 10px; padding: 0.4rem 0.7rem; margin-bottom: 1rem; font-size: 0.9rem; }
+.add-preview-item { padding: 0.25rem 0; border-bottom: 1px solid #eee; font-weight: 600; }
+.add-preview-item:last-child { border-bottom: none; }
+.add-error { color: var(--danger); font-size: 0.85rem; font-weight: 600; padding: 0.3rem 0; }
+.modal-actions .primary-btn:disabled { opacity: 0.4; cursor: default; }

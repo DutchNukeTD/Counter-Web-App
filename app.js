@@ -673,12 +673,16 @@ let historyStaged = false;        // "Trapsgewijs": 1e geselecteerde 1x stap, 2e
 let historySelected = new Set();  // geselecteerde event-id's
 let historyDraft = null;          // { cardId, events, original: Map(id -> timestamp), deleted: Set(id) }
 
-const loadHistoryDraft = async (cardId) => {
+const loadHistoryDraft = async (cardId, card) => {
     const all = await getAllFromStore('events');
     const events = all.filter(e => e.cardId === cardId)
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .map(e => ({ ...e }));
-    historyDraft = { cardId, events, original: new Map(events.map(e => [e.id, e.timestamp])), deleted: new Set() };
+    historyDraft = {
+        cardId, events, original: new Map(events.map(e => [e.id, e.timestamp])), deleted: new Set(),
+        delta: (card && card.stepValue) || 1,                                      // waarde per nieuwe klik
+        canAdd: !!card && !['eten', 'poep'].includes(String(card.name).toLowerCase()) // alleen gewone kaarten
+    };
 };
 
 const visibleDraftEvents = () => historyDraft ? historyDraft.events.filter(e => !historyDraft.deleted.has(e.id)) : [];
@@ -710,18 +714,19 @@ const renderHistoryToolbar = () => {
     const el = document.getElementById('historyToolbar');
     if (!el) return;
     const n = historySelected.size;
-    const dis = n === 0 ? 'disabled' : '';
+    el.classList.toggle('hidden', n === 0);
+    if (n === 0) return;
     el.innerHTML = `<div class="history-toolbar-row">
             <label class="history-mode-label"><input type="checkbox" ${historyStaged ? 'checked' : ''} onchange="toggleHistoryStaged(this.checked)"> Trapsgewijs</label>
             <div class="event-step-group">
-                <button type="button" class="step-btn" ${dis} onclick="shiftSelectedEvents(-1)" title="Eerder">−</button>
+                <button type="button" class="step-btn" onclick="shiftSelectedEvents(-1)" title="Eerder">−</button>
                 <button type="button" class="step-btn step-value" onclick="openStepModal()" title="Stapgrootte wijzigen">${historyStep}m</button>
-                <button type="button" class="step-btn" ${dis} onclick="shiftSelectedEvents(1)" title="Later">+</button>
+                <button type="button" class="step-btn" onclick="shiftSelectedEvents(1)" title="Later">+</button>
             </div></div>
         ${historyStaged ? `<div class="history-hint">Van boven naar beneden: 1×, 2×, 3× de stap</div>` : ''}
         <div class="history-toolbar-row">
             <span class="history-sel-count">${n} geselecteerd</span>
-            <button type="button" class="history-small-btn" ${dis} onclick="clearEventSelection()">Deselecteer</button></div>`;
+            <button type="button" class="history-small-btn" onclick="clearEventSelection()">Deselecteer</button></div>`;
 };
 
 const renderEventHistory = () => {
@@ -732,7 +737,8 @@ const renderEventHistory = () => {
         editActions.parentNode.insertBefore(container, editActions);
     }
     const events = visibleDraftEvents();
-    let html = `<div id="historyToolbar" class="history-toolbar"></div>
+    let html = `${historyDraft && historyDraft.canAdd ? `<button type="button" class="history-add-btn" onclick="openAddEventsModal()">+ Achteraf toevoegen</button>` : ''}
+        <div id="historyToolbar" class="history-toolbar hidden"></div>
         <label style="display:block; font-size:0.8rem; font-weight:bold; margin-bottom:0.4rem; color:#777;">Klik Historie</label>`;
     if (events.length === 0) html += `<div style="font-size:0.85rem; color:#999; margin-bottom: 1.5rem;">Geen data.</div>`;
     else {
@@ -843,6 +849,163 @@ window.openStepModal = () => {
     modal.classList.remove('hidden');
 };
 
+// --- ACHTERAF TOEVOEGEN: meerdere kliks tegelijk aanmaken (als concept, pas definitief bij Opslaan) ---
+const MIN_GAP_KEY = 'eventCounterMinGap';
+let historyMinGap = (() => {   // minimale afstand (minuten) bij 'Willekeurig', wordt onthouden
+    try { const v = parseInt(localStorage.getItem(MIN_GAP_KEY), 10); return v >= 1 ? v : 15; }
+    catch (e) { return 15; }
+})();
+let addMode = 'even';   // 'even' | 'interval' | 'random'
+let addTimes = [];      // tijden (ms) uit het voorbeeld
+
+const ADD_GRID = 5 * 60000;
+const localDateStr = (offsetDays = 0) => {   // 'YYYY-MM-DD' van vandaag + offset, in lokale tijd
+    const d = new Date(); d.setDate(d.getDate() + offsetDays);
+    return toLocalDatetime(d.toISOString()).slice(0, 10);
+};
+const fmtDuration = (m) => m < 60 ? `${m} min` : `${Math.floor(m / 60)} u${m % 60 ? ' ' + (m % 60) + ' min' : ''}`;
+
+// Gelijkmatig: eerste precies op 'van', laatste precies op 'tot'
+const computeEvenTimes = (from, to, n) => n === 1 ? [from] :
+    Array.from({ length: n }, (_, i) => i === n - 1 ? to : Math.round((from + (to - from) * i / (n - 1)) / 60000) * 60000);
+
+// Vast interval: vanaf 'van', steeds 'interval' minuten verder
+const computeIntervalTimes = (from, n, interval) => Array.from({ length: n }, (_, i) => from + i * interval * 60000);
+
+// Willekeurig: op hele 5 minuten, met minimale afstand
+const computeRandomTimes = (from, to, n, minGap) => {
+    const first = Math.ceil(from / ADD_GRID) * ADD_GRID;
+    const last = Math.floor(to / ADD_GRID) * ADD_GRID;
+    const slots = last >= first ? Math.floor((last - first) / ADD_GRID) + 1 : 0;
+    if (slots < 1) return { error: 'Er valt geen tijdstip (op 5 minuten afgerond) binnen deze periode.' };
+    const gapSlots = Math.max(1, Math.ceil(minGap / 5));
+    const needed = (n - 1) * gapSlots;
+    if (slots - 1 < needed) {
+        return { error: `Past niet: ${n} kliks met minimaal ${gapSlots * 5} min afstand vragen minstens ${fmtDuration(needed * 5)}.` };
+    }
+    const room = slots - 1 - needed;
+    const vals = Array.from({ length: n }, () => Math.floor(Math.random() * (room + 1))).sort((a, b) => a - b);
+    return { times: vals.map((v, i) => first + (v + i * gapSlots) * ADD_GRID) };
+};
+
+const refreshAddPreview = () => {
+    const modal = document.getElementById('addEventsModal');
+    if (!modal) return;
+    const n = parseInt(document.getElementById('addCount').value, 10);
+    const dateVal = document.getElementById('addDate').value;
+    const fromT = document.getElementById('addFrom').value;
+    const toT = document.getElementById('addTo').value;
+    const from = dateVal && fromT ? new Date(`${dateVal}T${fromT}`).getTime() : NaN;
+    let to = dateVal && toT ? new Date(`${dateVal}T${toT}`).getTime() : NaN;
+    const crossesMidnight = !isNaN(from) && !isNaN(to) && to < from;
+    if (crossesMidnight) { const d = new Date(to); d.setDate(d.getDate() + 1); to = d.getTime(); }  // eindtijd valt op de volgende dag
+    const interval = parseInt(document.getElementById('addInterval').value, 10);
+    const gap = parseInt(document.getElementById('addGap').value, 10);
+    if (gap >= 1) {   // onthouden voor de volgende keer
+        historyMinGap = gap;
+        try { localStorage.setItem(MIN_GAP_KEY, String(gap)); } catch (e) {}
+    }
+
+    modal.querySelectorAll('.add-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === addMode));
+    modal.querySelectorAll('.add-day-btn').forEach(b => b.classList.toggle('active', dateVal === localDateStr(Number(b.dataset.offset))));
+    const dayHint = document.getElementById('addDayHint');
+    dayHint.classList.toggle('hidden', !crossesMidnight);
+    if (crossesMidnight) dayHint.textContent = `Tot valt na middernacht, op ${new Date(to).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}.`;
+    document.getElementById('addToRow').classList.toggle('hidden', addMode === 'interval');
+    document.getElementById('addIntervalRow').classList.toggle('hidden', addMode !== 'interval');
+    document.getElementById('addGapRow').classList.toggle('hidden', addMode !== 'random');
+    document.getElementById('addShuffleBtn').classList.toggle('hidden', addMode !== 'random');
+
+    let times = [], error = '';
+    if (!(n >= 1 && n <= 200)) error = 'Vul een aantal in tussen 1 en 200.';
+    else if (!dateVal) error = 'Kies een datum.';
+    else if (isNaN(from)) error = 'Vul een begintijd in.';
+    else if (addMode === 'interval') {
+        if (!(interval >= 1)) error = 'Vul de tijd ertussen in (minimaal 1 minuut).';
+        else times = computeIntervalTimes(from, n, interval);
+    } else if (isNaN(to)) error = 'Vul een eindtijd in.';
+    else if (addMode === 'even') times = computeEvenTimes(from, to, n);
+    else if (!(gap >= 1)) error = 'Vul een minimale afstand in (minimaal 1 minuut).';
+    else {
+        const r = computeRandomTimes(from, to, n, gap);
+        if (r.error) error = r.error; else times = r.times;
+    }
+    addTimes = error ? [] : times;
+
+    const fmt = (t) => new Date(t).toLocaleString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    document.getElementById('addPreview').innerHTML = error
+        ? `<div class="add-error">${error}</div>`
+        : addTimes.map((t, i) => `<div class="add-preview-item">${i + 1}. ${fmt(t)}</div>`).join('');
+    document.getElementById('addConfirmBtn').disabled = !addTimes.length;
+};
+
+window.openAddEventsModal = () => {
+    if (!historyDraft || !historyDraft.canAdd) return;
+    let modal = document.getElementById('addEventsModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'addEventsModal'; modal.className = 'modal hidden'; modal.style.zIndex = '1200';
+        modal.innerHTML = `<div class="modal-content add-modal-content">
+            <h3>Achteraf toevoegen</h3>
+            <label class="add-label">Aantal kliks</label>
+            <input type="number" id="addCount" min="1" max="200" inputmode="numeric">
+            <label class="add-label">Verdeling</label>
+            <div class="add-modes">
+                <button type="button" class="add-mode-btn" data-mode="even">Gelijkmatig</button>
+                <button type="button" class="add-mode-btn" data-mode="interval">Vast interval</button>
+                <button type="button" class="add-mode-btn" data-mode="random">Willekeurig</button>
+            </div>
+            <label class="add-label">Datum</label>
+            <div class="add-quick">
+                <button type="button" class="add-day-btn" data-offset="0">Vandaag</button>
+                <button type="button" class="add-day-btn" data-offset="-1">Gisteren</button></div>
+            <input type="date" id="addDate">
+            <label class="add-label">Van (tijd)</label>
+            <input type="time" id="addFrom">
+            <div id="addToRow"><label class="add-label">Tot (tijd)</label><input type="time" id="addTo">
+                <div id="addDayHint" class="add-hint hidden"></div></div>
+            <div id="addIntervalRow"><label class="add-label">Tijd ertussen (minuten)</label><input type="number" id="addInterval" min="1" inputmode="numeric"></div>
+            <div id="addGapRow"><label class="add-label">Minimale afstand (minuten)</label><input type="number" id="addGap" min="1" inputmode="numeric">
+                <div class="add-hint">Tijden worden op hele 5 minuten gezet; de afstand wordt omhoog afgerond op een veelvoud van 5.</div></div>
+            <div class="add-preview-head"><label class="add-label">Voorbeeld</label>
+                <button type="button" id="addShuffleBtn" class="history-small-btn">🎲 Opnieuw schudden</button></div>
+            <div id="addPreview" class="add-preview"></div>
+            <div class="modal-actions">
+                <button type="button" id="addCancelBtn" class="secondary-btn">Annuleren</button>
+                <button type="button" id="addConfirmBtn" class="primary-btn">Toevoegen</button></div></div>`;
+        document.body.appendChild(modal);
+        ['addCount', 'addDate', 'addFrom', 'addTo', 'addInterval', 'addGap'].forEach(id => document.getElementById(id).addEventListener('input', refreshAddPreview));
+        modal.querySelectorAll('.add-mode-btn').forEach(b => b.onclick = () => { addMode = b.dataset.mode; refreshAddPreview(); });
+        modal.querySelectorAll('.add-day-btn').forEach(b => b.onclick = () => { document.getElementById('addDate').value = localDateStr(Number(b.dataset.offset)); refreshAddPreview(); });
+        document.getElementById('addShuffleBtn').onclick = refreshAddPreview;
+        document.getElementById('addCancelBtn').onclick = () => modal.classList.add('hidden');
+        document.getElementById('addConfirmBtn').onclick = () => { addDraftEvents(addTimes); modal.classList.add('hidden'); };
+    }
+    // Standaardwaarden: eindtijd = nu (op 5 min), begintijd = 1 uur eerder
+    const end = Math.floor(Date.now() / ADD_GRID) * ADD_GRID;
+    addMode = 'even';
+    document.getElementById('addCount').value = 3;
+    const startLocal = toLocalDatetime(new Date(end - 3600000).toISOString());   // 'YYYY-MM-DDTHH:MM'
+    document.getElementById('addDate').value = startLocal.slice(0, 10);
+    document.getElementById('addFrom').value = startLocal.slice(11);
+    document.getElementById('addTo').value = toLocalDatetime(new Date(end).toISOString()).slice(11);
+    document.getElementById('addInterval').value = 60;
+    document.getElementById('addGap').value = historyMinGap;
+    modal.classList.remove('hidden');
+    refreshAddPreview();
+};
+
+// Nieuwe kliks bovenaan de lijst zetten (nieuwste eerst) en direct aanvinken, zodat je ze nog kunt bijstellen
+const addDraftEvents = (times) => {
+    if (!historyDraft || !times.length) return;
+    const newEvents = times.slice().sort((a, b) => b - a).map(t => ({
+        id: crypto.randomUUID(), cardId: historyDraft.cardId, timestamp: new Date(t).toISOString(), delta: historyDraft.delta
+    }));
+    historyDraft.events.unshift(...newEvents);
+    historySelected = new Set(newEvents.map(e => e.id));
+    renderEventHistory();
+};
+
 window.openEditModal = async (id) => {
     editingCardId = id;
     const cards = await getAllFromStore('cards');
@@ -854,7 +1017,7 @@ window.openEditModal = async (id) => {
     document.getElementById('archiveCardBtn').textContent = card.archived ? 'Herstel naar Fav' : 'Archiveer';
     document.getElementById('editActionsArea').classList.remove('hidden');
     historyStaged = false; historySelected = new Set();
-    await loadHistoryDraft(id);
+    await loadHistoryDraft(id, card);
     updateColorSelection(); renderEventHistory();
     document.getElementById('newCardModal').classList.remove('hidden');
 };
